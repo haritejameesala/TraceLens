@@ -30,3 +30,8 @@ jobs:
         run: python -m pytest -q
       - name: Check SDK import
         run: python -c "from tracelens_sdk import TraceLens, TraceEvent; print('TraceLens SDK import OK')"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check dashboard JavaScript syntax
+        run: node --check tracelens-backend/app/static/app.js
