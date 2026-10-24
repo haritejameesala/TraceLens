@@ -50,18 +50,18 @@ def main():
             response.raise_for_status()
 
         baseline = create_run("Password policy — baseline", "v1.4.0")
-        event(baseline, "demo_baseline_retrieval", "retrieve_documents", "retrieval",
+        event(baseline, f"demo_{run_tag}_baseline_retrieval", "retrieve_documents", "retrieval",
               {"query": "minimum password length", "relevant_chunk_count": 3,
                "chunk_ids": ["security-01", "security-02", "security-03"], "retriever": "tfidf"})
-        event(baseline, "demo_baseline_generation", "generate_answer", "generation",
+        event(baseline, f"demo_{run_tag}_baseline_generation", "generate_answer", "generation",
               {"answer_supported": True, "output_summary": "Passwords must be at least 14 characters."}, duration=420)
         api.patch(f"/api/runs/{baseline}", json={"status": "success"}).raise_for_status()
 
         current = create_run("Password policy — regression", "v1.5.0")
-        event(current, "demo_current_retrieval", "retrieve_documents", "retrieval",
+        event(current, f"demo_{run_tag}_current_retrieval", "retrieve_documents", "retrieval",
               {"query": "minimum password length", "relevant_chunk_count": 0,
                "chunk_ids": [], "retriever": "tfidf", "filter": "security-policy-v2"})
-        event(current, "demo_current_generation", "generate_answer", "generation",
+        event(current, f"demo_{run_tag}_current_generation", "generate_answer", "generation",
               {"answer_supported": False, "output_summary": "No relevant evidence was retrieved."}, status="warning", duration=105)
         api.patch(f"/api/runs/{current}", json={"status": "failed"}).raise_for_status()
 
