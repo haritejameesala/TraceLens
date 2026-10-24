@@ -35,3 +35,6 @@ jobs:
           node-version: "20"
       - name: Check dashboard JavaScript syntax
         run: node --check tracelens-backend/app/static/app.js
+
+      - name: Compile all Python source files
+        run: python -m compileall -q tracelens-sdk/tracelens_sdk tracelens-backend/app rag-project-1 rag-project-2 scripts
