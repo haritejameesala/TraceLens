@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0a0d14"><title>TraceLens — RAG Observability</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div class="shell">
+<aside class="sidebar">
+  <a class="brand" href="#"><span class="brand-mark">T</span><span>trace<span class="brand-light">lens</span><small>AI SYSTEMS OBSERVABILITY</small></span></a>
+  <div class="side-label">WORKSPACE</div>
+  <button class="nav active" data-view="overview"><span>◫</span> Overview</button>
+  <button class="nav" data-view="runs"><span>⌁</span> Traces & runs</button>
+  <button class="nav" data-view="knowledge"><span>▤</span> Knowledge base</button>
+  <button class="nav" data-view="diagnose"><span>✳</span> AI diagnosis</button>
+  <div class="side-spacer"></div>
+  <div class="side-status"><span class="pulse"></span><span id="connection-label">Connecting to API…</span></div>
+  <button class="nav" id="settings-button"><span>⚙</span> API settings</button>
+  <div class="sidebar-foot">TRACE. COMPARE. UNDERSTAND.<br><span>TRACELENS v0.4</span></div>
+</aside>
+<main class="main">
+<header class="topbar"><div><div class="eyebrow" id="crumb">WORKSPACE / OVERVIEW</div><h1 id="page-title">System overview</h1></div><div class="top-actions"><span class="pill" id="llm-pill"><i></i> LLM checking…</span><button class="button button-ghost" id="refresh-button">↻ Refresh</button><button class="button button-primary" id="new-project-button">＋ New project</button></div></header>
+<div id="notice" class="notice hidden"></div>
+<section id="view-overview" class="view">
+  <div class="hero"><div><div class="hero-kicker"><span class="tiny-dot"></span> OBSERVABILITY FOR AI SYSTEMS</div><h2>Find what changed.<br><span>Understand why.</span></h2><p>Trace every step of your RAG pipeline, compare runs, and investigate regressions with evidence instead of guesswork.</p><div class="hero-actions"><button class="button button-primary" id="hero-project">Create a project <span>↗</span></button><button class="button button-ghost" data-goto="runs">Explore traces →</button></div></div><div class="hero-art"><div class="orbit orbit-a"></div><div class="orbit orbit-b"></div><div class="orbit orbit-c"></div><div class="core"><span>TL</span></div><div class="art-label label-a">RETRIEVAL <b>✓</b></div><div class="art-label label-b">GENERATION <b>↗</b></div><div class="art-label label-c">EVALUATION <b>◎</b></div></div></div>
+  <div class="metrics"><article class="metric"><div class="metric-top"><span>Total projects</span><span class="metric-icon">⌘</span></div><strong id="metric-projects">—</strong><small>Tracked workspaces</small></article><article class="metric"><div class="metric-top"><span>Total runs</span><span class="metric-icon">⌁</span></div><strong id="metric-runs">—</strong><small>Recorded executions</small></article><article class="metric"><div class="metric-top"><span>Failed runs</span><span class="metric-icon warn">!</span></div><strong id="metric-failed">—</strong><small>Need investigation</small></article><article class="metric"><div class="metric-top"><span>Knowledge docs</span><span class="metric-icon">▤</span></div><strong id="metric-docs">—</strong><small>Available as evidence</small></article></div>
+  <div class="section-heading"><div><div class="eyebrow">YOUR WORKSPACE</div><h3>Projects</h3></div><button class="text-button" data-goto="runs">View all runs ↗</button></div><div id="project-grid" class="project-grid"></div>
+  <div class="section-heading section-gap"><div><div class="eyebrow">RECENT ACTIVITY</div><h3>Latest runs</h3></div><button class="text-button" data-goto="runs">Open trace explorer ↗</button></div><div id="recent-runs" class="panel table-panel"></div>
+</section>
+<section id="view-runs" class="view hidden">
+  <div class="toolbar"><div class="field"><label>PROJECT</label><select id="run-project-select"><option value="">Select project</option></select></div><div class="field"><label>FILTER</label><select id="run-filter"><option value="all">All statuses</option><option value="failed">Failed</option><option value="success">Success</option><option value="running">Running</option></select></div><button class="button button-ghost" id="compare-open">Compare two runs</button></div>
+  <div id="runs-table" class="panel table-panel"></div><div id="run-detail" class="detail-grid hidden"></div>
+  <div id="compare-panel" class="panel compare-panel hidden"><div class="panel-title"><div><div class="eyebrow">REGRESSION ANALYSIS</div><h3>Compare baseline and current</h3></div><button class="icon-button" id="compare-close">×</button></div><div class="compare-fields"><div class="field"><label>BASELINE RUN ID</label><input id="baseline-id" placeholder="run_…"></div><div class="field"><label>CURRENT RUN ID</label><input id="current-id" placeholder="run_…"></div><button class="button button-primary" id="compare-button">Compare runs →</button></div><div id="compare-result"></div></div>
+</section>
+<section id="view-knowledge" class="view hidden">
+  <div class="section-heading"><div><div class="eyebrow">GROUNDED CONTEXT</div><h3>Project knowledge</h3><p class="muted">Upload runbooks and engineering notes so diagnosis can cite your own evidence.</p></div></div>
+  <div class="panel knowledge-form"><div class="panel-title"><div><div class="eyebrow">INGEST SOURCE</div><h3>Add a knowledge document</h3></div><span class="tag">CHUNKED · SEARCHABLE</span></div><div class="field-row"><div class="field grow"><label>PROJECT</label><select id="knowledge-project-select"><option value="">Select project</option></select></div><div class="field grow"><label>DOCUMENT TITLE</label><input id="knowledge-title" placeholder="e.g. RAG troubleshooting runbook"></div></div><div class="field"><label>SOURCE / URL (OPTIONAL)</label><input id="knowledge-source" placeholder="internal runbook, docs link, incident note…"></div><div class="field"><label>CONTENT</label><textarea id="knowledge-content" rows="6" placeholder="Paste a runbook, incident postmortem, retrieval notes, or troubleshooting guide…"></textarea></div><div class="form-footer"><span class="muted">Stored in MongoDB. Split into overlapping searchable chunks.</span><button class="button button-primary" id="ingest-button">Ingest document ↗</button></div></div>
+  <div class="section-heading"><div><div class="eyebrow">INDEXED SOURCES</div><h3>Knowledge library</h3></div><button class="button button-ghost" id="knowledge-refresh">Refresh</button></div><div id="knowledge-list" class="panel table-panel"></div>
+  <div class="panel search-panel"><div class="panel-title"><div><div class="eyebrow">RETRIEVAL INSPECTOR</div><h3>Search your evidence</h3></div></div><div class="search-row"><input id="knowledge-query" placeholder="What does the runbook say about retrieval failures?"><button class="button button-primary" id="search-button">Search ↗</button></div><div id="search-results"></div></div>
+</section>
+<section id="view-diagnose" class="view hidden">
+  <div class="diagnose-hero"><div class="hero-kicker"><span class="tiny-dot"></span> EVIDENCE-GROUNDED INVESTIGATION</div><h2>Ask TraceLens.</h2><p>Retrieve relevant knowledge, optionally inspect a specific run, and get a source-aware investigation. Configure an LLM to enable generated analysis.</p></div>
+  <div class="panel diagnose-form"><div class="field"><label>PROJECT</label><select id="diagnose-project-select"><option value="">Select project</option></select></div><div class="field"><label>QUESTION</label><textarea id="diagnose-question" rows="3" placeholder="Why did the answer quality drop after the latest retrieval change?"></textarea></div><div class="field"><label>RUN ID (OPTIONAL)</label><input id="diagnose-run-id" placeholder="Attach a trace run_…"></div><div class="form-footer"><span class="muted" id="diagnose-mode-note">Diagnosis will clearly label evidence-only mode if no LLM is configured.</span><button class="button button-primary" id="diagnose-button">Investigate <span>✳</span></button></div></div>
+  <div id="diagnosis-result"></div><div class="section-heading section-gap"><div><div class="eyebrow">INVESTIGATION HISTORY</div><h3>Recent diagnoses</h3></div></div><div id="diagnosis-history" class="panel table-panel"></div>
+</section>
+<footer class="footer"><span>TraceLens <b>·</b> Observability for AI systems</span><span>Evidence first. Hypotheses labeled. <b>↗</b></span></footer>
+</main></div>
+<dialog id="project-dialog"><form method="dialog" id="project-form"><div class="dialog-top"><div><div class="eyebrow">NEW WORKSPACE</div><h3>Create project</h3></div><button class="icon-button" value="cancel">×</button></div><div class="field"><label>PROJECT NAME</label><input id="project-name" required maxlength="120" placeholder="e.g. Customer support RAG"></div><div class="field"><label>DESCRIPTION</label><textarea id="project-description" rows="3" placeholder="What are you tracing?"></textarea></div><div class="field"><label>FRAMEWORK / STACK</label><input id="project-framework" value="python" placeholder="python, langchain, llamaindex…"></div><div class="dialog-actions"><button class="button button-ghost" value="cancel">Cancel</button><button class="button button-primary" id="create-project-button" value="default">Create project ↗</button></div></form></dialog>
+<dialog id="settings-dialog"><form method="dialog" id="settings-form"><div class="dialog-top"><div><div class="eyebrow">CONNECTION</div><h3>API settings</h3></div><button class="icon-button" value="cancel">×</button></div><p class="muted">The key is stored only in this browser tab's session memory.</p><div class="field"><label>TRACE LENS API KEY</label><input id="api-key-input" type="password" autocomplete="off" placeholder="Optional local development key"></div><div class="dialog-actions"><button class="button button-ghost" value="cancel">Cancel</button><button class="button button-primary" id="save-settings" value="default">Save key</button></div></form></dialog>
+<div id="toast" class="toast hidden"></div><script src="/static/app.js" defer></script>
+</body></html>
