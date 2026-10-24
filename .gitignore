@@ -1,109 +1,144 @@
+# ============================================================
+# TraceLens — repository-wide .gitignore
+# Place this file at the repository root (next to the .git folder)
+# ============================================================
 
-# ==============================
-# Secrets and environment files
-# ==============================
+# --- Secrets and local configuration ---
 .env
 .env.*
 !.env.example
+!.env.sample
 !.env.template
-**/.env
-**/.env.*
-!**/.env.example
-!**/.env.template
-
-# Credentials and certificates
 *.pem
 *.key
 *.p12
 *.pfx
-credentials.json
-secrets.json
+secrets/
+.local/
+*.secret
 
-# ==============================
-# Python
-# ==============================
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
-*.egg-info/
-.eggs/
-dist/
+*.so
+.Python
 build/
+dist/
+downloads/
+.eggs/
+*.egg-info/
 wheels/
 pip-wheel-metadata/
 .pytest_cache/
 .mypy_cache/
+.pyright/
 .ruff_cache/
 .coverage
+.coverage.*
 htmlcov/
+.tox/
+.nox/
+.hypothesis/
 
-# Virtual environments
+# --- Python virtual environments ---
 .venv/
 venv/
 env/
 ENV/
+.python-version
 
-# ==============================
-# Node / React / Vite
-# ==============================
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Node / React / Vite ---
 node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+.yarn/*
+!.yarn/patches/
+!.yarn/plugins/
+!.yarn/releases/
+!.yarn/versions/
 dist/
 build/
-.vite/
 coverage/
+.vite/
+*.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 
-# ==============================
-# Local databases and RAG indexes
-# ==============================
-.chroma/
-**/.chroma/
-chroma/
-chromadb/
-*.sqlite
-*.sqlite3
-*.db
+# --- Frontend local environment files ---
+# (The general .env rules above apply; keep only example templates tracked.)
 
-# ==============================
-# Logs and temporary files
-# ==============================
+# --- Logs and temporary files ---
 *.log
 logs/
 tmp/
 temp/
 *.tmp
-*.bak
+*.temp
 *.swp
 *.swo
+*.bak
+*.orig
 .DS_Store
 Thumbs.db
-desktop.ini
+Desktop.ini
 
-# ==============================
-# IDE and editor files
-# ==============================
-.vscode/
+# --- IDEs and editors ---
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.example.json
 .idea/
-*.code-workspace
+*.iml
+*.sublime-workspace
+*.sublime-project
 
-# ==============================
-# MongoDB backups
-# ==============================
-*.archive
+# --- Local databases, caches, and vector stores ---
+*.sqlite
+*.sqlite3
+*.db
+*.mdb
+.chroma/
+chroma_db/
+chromadb/
+vector_store/
+vectorstore/
+faiss_index/
+qdrant_storage/
+weaviate_data/
+milvus_data/
+redis_data/
+mongodb_data/
+mongo-data/
+data/local/
+data/cache/
+
+# --- TraceLens generated artifacts / exports ---
+exports/
+artifacts/
+reports/generated/
+*.trace.json
+*.events.json
+*.findings.json
+*.dump
 *.bson
-*.metadata.json
+*.archive
+*.zip
+*.tar
+*.tar.gz
+*.7z
 
-# ==============================
-# Local model and cache files
-# ==============================
-.cache/
-**/.cache/
-huggingface/
-models/
+# --- Local test and runtime output ---
+.pytest_cache/
+playwright-report/
+test-results/
+*.pid
+*.seed
 
-# ==============================
-# Environment-specific files
-# ==============================
-*.local
+# --- OS-specific ---
+$RECYCLE.BIN/
+.Trashes/

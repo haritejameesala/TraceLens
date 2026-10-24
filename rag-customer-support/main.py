@@ -155,6 +155,22 @@ def ensure_project(project_id: str, api_url: str, strict: bool) -> str:
         return "customer-support-rag-unavailable"
 
 
+def _safe_endpoint(value: str) -> str:
+    """Return an endpoint suitable for telemetry without credentials or query strings."""
+    from urllib.parse import urlsplit
+    try:
+        parsed = urlsplit(str(value).strip())
+        if not parsed.scheme or not parsed.hostname:
+            return "configured-endpoint-unparseable"
+        host = parsed.hostname
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        port = f":{parsed.port}" if parsed.port else ""
+        return f"{parsed.scheme.lower()}://{host}{port}"
+    except (ValueError, TypeError):
+        return "configured-endpoint-unparseable"
+
+
 def main() -> None:
     from dotenv import load_dotenv
     from tracelens_sdk import TraceLens, langchain_callback
@@ -191,7 +207,9 @@ def main() -> None:
                 version=os.getenv("APP_VERSION", "1.0.0"),
                 metadata={"application": "customer-support-knowledge-assistant", "environment": os.getenv("APP_ENV", "local"),
                           "retrieval_k": int(os.getenv("RETRIEVAL_K", "4")), "embedding_model": os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
-                          "llm_model": os.getenv("OLLAMA_MODEL", "qwen2.5:3b")},
+                          "llm_model": os.getenv("OLLAMA_MODEL", "qwen2.5:3b"),
+                          # Store only scheme/host/port for history comparison; never record URL credentials or query parameters.
+                          "llm_endpoint": _safe_endpoint(os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"))},
             )
             try:
                 answer = chain.invoke({"question": question}, config={"callbacks": [callback], "run_name": "customer-support-rag"})

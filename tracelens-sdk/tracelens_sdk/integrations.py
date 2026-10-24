@@ -6,6 +6,7 @@ manual hooks or a custom integration. Payload capture is deliberately minimal.
 """
 from __future__ import annotations
 from time import perf_counter
+import hashlib
 from typing import Any
 
 try:
@@ -37,6 +38,15 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
         if self._trace_run is None:
             return
         payload = {"framework": "langchain", "framework_run_id": self._id(run_id)}
+        # Attach sanitized operational configuration to each stage event as well as
+        # run metadata. This makes generation-stage history comparable and avoids
+        # depending on run-level metadata being fetched by downstream consumers.
+        for key in ("llm_endpoint", "llm_model", "embedding_model", "retrieval_k", "environment", "application", "config_fingerprint", "configuration_fingerprint"):
+            value = self.metadata.get(key)
+            if value is not None and isinstance(value, (str, int, float, bool)):
+                payload[key] = str(value)[:300] if isinstance(value, str) else value
+        if self._root_id is not None:
+            payload["root_framework_run_id"] = self._root_id
         if parent_run_id is not None:
             payload["parent_run_id"] = self._id(parent_run_id)
         if extra:
@@ -49,7 +59,8 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
             duration = round((perf_counter() - started) * 1000, 3) if started is not None else None
         from .events import TraceEvent
         self._trace_run.record_event(TraceEvent(step=step[:120], event_type=event_type, status=status,
-            payload=payload, duration_ms=duration, error=(str(error)[:3000] if error else None)))
+            payload=payload, duration_ms=duration, error=(str(error)[:1000] if error else None),
+            trace_id=self._trace_run.trace_id))
 
     def on_chain_start(self, serialized, inputs, *, run_id, parent_run_id=None, **kwargs):
         rid = self._id(run_id)
@@ -60,8 +71,9 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
             self._trace_run = self.tracer.start_run(str(name)[:150], version=self.version,
                 metadata={**self.metadata, "framework": "langchain"})
             self._trace_run.__enter__()
+        safe_inputs = list(inputs.keys())[:50] if isinstance(inputs, dict) else []
         self._event((serialized or {}).get("name") or "chain", "custom", run_id, parent_run_id,
-                    extra={"phase": "start", "input_keys": list(inputs.keys())[:50] if isinstance(inputs, dict) else []})
+                    extra={"phase": "start", "input_keys": safe_inputs, "operation": "chain"})
 
     def on_chain_end(self, outputs, *, run_id, parent_run_id=None, **kwargs):
         self._event("chain", "custom", run_id, parent_run_id, extra={"phase": "end", "output_keys": list(outputs.keys())[:50] if isinstance(outputs, dict) else []})
@@ -95,22 +107,34 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
                 sources.append(str(source)[:300])
             if chunk_id is not None:
                 chunk_ids.append(str(chunk_id)[:120])
+        scores = []
+        for doc in docs[:50]:
+            metadata = getattr(doc, "metadata", {}) or {}
+            score = metadata.get("score", metadata.get("relevance_score"))
+            if isinstance(score, (int, float)) and not isinstance(score, bool):
+                scores.append({"rank": len(scores) + 1, "score": float(score),
+                               "source": str(metadata.get("source", ""))[:300]})
         self._event("retriever", "retrieval", run_id, parent_run_id,
                     extra={"phase": "end", "retrieved_chunk_count": len(docs),
-                           "source_files": sorted(set(sources))[:50], "chunk_ids": chunk_ids})
+                           "source_files": sorted(set(sources))[:50], "chunk_ids": chunk_ids,
+                           "available_relevance_scores": scores})
 
     def on_retriever_error(self, error, *, run_id, parent_run_id=None, **kwargs):
         self._event("retriever", "error", run_id, parent_run_id, status="failed", error=error, extra={"phase": "error"})
 
     def on_llm_start(self, serialized, prompts, *, run_id, parent_run_id=None, **kwargs):
         self._started[self._id(run_id)] = perf_counter()
+        model_name = (serialized or {}).get("kwargs", {}).get("model") or (serialized or {}).get("kwargs", {}).get("model_name")
         self._event((serialized or {}).get("name") or "llm", "generation", run_id, parent_run_id,
-                    extra={"phase": "start", "prompt_count": len(prompts) if prompts else 0})
+                    extra={"phase": "start", "prompt_count": len(prompts) if prompts else 0,
+                           "model": str(model_name)[:160] if model_name else None, "operation": "generation"})
 
     def on_chat_model_start(self, serialized, messages, *, run_id, parent_run_id=None, **kwargs):
         self._started[self._id(run_id)] = perf_counter()
+        model_name = (serialized or {}).get("kwargs", {}).get("model") or (serialized or {}).get("kwargs", {}).get("model_name")
         self._event((serialized or {}).get("name") or "chat_model", "generation", run_id, parent_run_id,
-                    extra={"phase": "start", "message_batch_count": len(messages) if messages else 0})
+                    extra={"phase": "start", "message_batch_count": len(messages) if messages else 0,
+                           "model": str(model_name)[:160] if model_name else None, "operation": "generation"})
 
     def on_llm_end(self, response, *, run_id, parent_run_id=None, **kwargs):
         payload = {"phase": "end"}
@@ -120,6 +144,12 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
                           if isinstance(v, (int, float)) and not isinstance(v, bool)}
             if safe_usage:
                 payload["token_usage"] = safe_usage
+        response_metadata = getattr(response, "llm_output", None)
+        if isinstance(response_metadata, dict):
+            for source_key, target_key in (("model_name", "model"), ("model", "model"), ("finish_reason", "finish_reason")):
+                value = response_metadata.get(source_key)
+                if isinstance(value, (str, int, float)):
+                    payload[target_key] = str(value)[:160]
         self._event("generation", "generation", run_id, parent_run_id, extra=payload)
 
     def on_llm_error(self, error, *, run_id, parent_run_id=None, **kwargs):

@@ -35,3 +35,31 @@ def test_non_strict_mode_survives_backend_unavailable():
 def test_empty_project_rejected():
     with pytest.raises(ValueError):
         TraceLens(" ")
+
+
+def test_run_records_start_and_failure_lifecycle_events():
+    calls = []
+    def handler(req):
+        body = req.read().decode()
+        calls.append((req.method, req.url.path, body))
+        if req.method == "POST" and req.url.path == "/api/runs":
+            return httpx.Response(201, json={"run_id": "run-failed"})
+        return httpx.Response(200, json={"status": "stored"})
+    tracer = client_with(handler)
+    try:
+        try:
+            with tracer.start_run("failing-test") as run:
+                with run.trace_step("model.invoke", event_type="generation"):
+                    raise ConnectionError("connection refused")
+        except ConnectionError:
+            pass
+        event_bodies = [body for method, path, body in calls if method == "POST" and path.endswith("/events")]
+        import json
+        events = [json.loads(body) for body in event_bodies]
+        assert any(e["step"] == "run.started" for e in events)
+        assert any(e["step"] == "model.invoke" and e["status"] == "failed" for e in events)
+        assert any(e["step"] == "run.failed" and e["status"] == "failed" for e in events)
+        patch = [json.loads(body) for method, path, body in calls if method == "PATCH" and path == "/api/runs/run-failed"]
+        assert patch[-1]["status"] == "failed"
+    finally:
+        tracer.close()
