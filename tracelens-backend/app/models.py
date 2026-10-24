@@ -5,6 +5,7 @@ from uuid import uuid4
 def now(): return datetime.now(timezone.utc)
 def make_id(prefix): return f"{prefix}_{uuid4().hex[:14]}"
 class ProjectCreate(BaseModel):
+    project_key: str | None = Field(default=None, min_length=3, max_length=160, pattern=r"^[a-z0-9][a-z0-9._:-]*$")
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=800)
     framework: str = Field(default="python", max_length=80)

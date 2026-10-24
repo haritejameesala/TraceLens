@@ -1,49 +1,109 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyd
-*.egg-info/
-build/
-dist/
-.venv/
-venv/
-ENV/
 
-# Secrets / local configuration
+# ==============================
+# Secrets and environment files
+# ==============================
 .env
 .env.*
 !.env.example
-!.env.*.example
+!.env.template
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.template
+
+# Credentials and certificates
 *.pem
 *.key
-secrets/
-credentials/
+*.p12
+*.pfx
+credentials.json
+secrets.json
 
-# Tests / tooling
+# ==============================
+# Python
+# ==============================
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+wheels/
+pip-wheel-metadata/
 .pytest_cache/
-.coverage*
-htmlcov/
 .mypy_cache/
 .ruff_cache/
-.tox/
+.coverage
+htmlcov/
 
-# Editors / OS
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
 
-# Logs and local databases
-*.log
-logs/
+# ==============================
+# Node / React / Vite
+# ==============================
+node_modules/
+dist/
+build/
+.vite/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# ==============================
+# Local databases and RAG indexes
+# ==============================
+.chroma/
+**/.chroma/
+chroma/
+chromadb/
 *.sqlite
 *.sqlite3
 *.db
 
-# Generated vector indexes and model caches
-chroma_db/
-chroma_data/
-vector_store/
-faiss_index/
+# ==============================
+# Logs and temporary files
+# ==============================
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==============================
+# IDE and editor files
+# ==============================
+.vscode/
+.idea/
+*.code-workspace
+
+# ==============================
+# MongoDB backups
+# ==============================
+*.archive
+*.bson
+*.metadata.json
+
+# ==============================
+# Local model and cache files
+# ==============================
 .cache/
-huggingface_cache/
+**/.cache/
+huggingface/
+models/
+
+# ==============================
+# Environment-specific files
+# ==============================
+*.local

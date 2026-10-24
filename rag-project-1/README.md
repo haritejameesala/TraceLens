@@ -1,1 +1,0 @@
-RAG Project 1: custom TF-IDF retrieval. Install `pip install -r requirements.txt` and `pip install -e ..\\tracelens-sdk`, then run `python main.py`. Requires TraceLens backend at localhost:8000.

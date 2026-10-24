@@ -1,11 +1,15 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+import re
 import logging
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
 from pymongo.errors import DuplicateKeyError
-from app.db import client, db, ensure_indexes
+from app.db import client, db, ensure_indexes, deduplicate_legacy_projects
 from app.models import ProjectCreate, RunCreate, RunUpdate, EventCreate, CompareRequest, make_id
 from app.diagnostics import diagnose
+from app.investigation import deterministic_diagnosis, enrich_with_ollama
+from app.config import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tracelens")
@@ -23,7 +27,9 @@ def clean(doc):
 async def lifespan(app: FastAPI):
     # Startup does not claim readiness until MongoDB ping and indexes succeed.
     await client.admin.command("ping")
+    await deduplicate_legacy_projects()
     await ensure_indexes()
+    await db.projects.create_index("project_key", unique=True, sparse=True)
     logger.info("TraceLens backend ready; MongoDB connected; database=%s", db.name)
     try:
         yield
@@ -32,6 +38,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="TraceLens API", version="0.4.0", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+)
 
 
 @app.get("/health")
@@ -45,9 +61,38 @@ async def health():
 
 
 @app.post("/api/projects", status_code=201)
-async def create_project(body: ProjectCreate):
-    doc = {"project_id": make_id("prj"), **body.model_dump(), "created_at": datetime.now(timezone.utc)}
-    await db.projects.insert_one(doc)
+async def create_project(body: ProjectCreate, response: Response):
+    # Idempotency is explicit when project_key is supplied. For older SDK/demo clients,
+    # reuse a same-name + same-framework project rather than creating duplicates.
+    values = body.model_dump()
+    key = values.get("project_key")
+    if not key:
+        key = re.sub(r"[^a-z0-9]+", "-", f"{body.name}-{body.framework}".lower()).strip("-")[:150]
+        values["project_key"] = key
+    existing = await db.projects.find_one({"project_key": key})
+    if existing:
+        response.status_code = 200
+        # Keep the existing identity and history; update descriptive fields only.
+        await db.projects.update_one({"project_id": existing["project_id"]}, {"$set": {
+            "name": body.name, "description": body.description, "framework": body.framework
+        }})
+        existing.update({"name": body.name, "description": body.description, "framework": body.framework})
+        return clean(existing)
+    # Legacy duplicate protection for records created before project_key existed.
+    existing = await db.projects.find_one({"name": body.name, "framework": body.framework})
+    if existing:
+        response.status_code = 200
+        await db.projects.update_one({"project_id": existing["project_id"]}, {"$set": {"project_key": key}})
+        existing["project_key"] = key
+        return clean(existing)
+    doc = {"project_id": make_id("prj"), **values, "created_at": datetime.now(timezone.utc)}
+    try:
+        await db.projects.insert_one(doc)
+    except DuplicateKeyError:
+        existing = await db.projects.find_one({"project_key": key})
+        if existing:
+            return clean(existing)
+        raise
     return clean(doc)
 
 
@@ -142,3 +187,44 @@ async def list_findings(run_id: str):
     if not await db.runs.find_one({"run_id": run_id}):
         raise HTTPException(404, "Run not found")
     return [clean(x) async for x in db.findings.find({"run_id": run_id}).sort("created_at", -1).limit(100)]
+
+
+@app.post("/api/runs/{run_id}/investigate")
+async def investigate_run(run_id: str):
+    """Investigate one run using its full timeline and same-project run history."""
+    run = await db.runs.find_one({"run_id": run_id})
+    if not run:
+        raise HTTPException(404, "Run not found")
+    events = [clean(x) async for x in db.events.find({"run_id": run_id}).sort("timestamp", 1)]
+    history = [clean(x) async for x in db.runs.find({"project_id": run["project_id"]}).sort("created_at", -1).limit(30)]
+    report = deterministic_diagnosis(clean(run), events, history)
+    # Include event histories from recent same-project runs so the analyst can compare
+    # stage sequences and error patterns, not just aggregate success/failure counts.
+    prior_ids = [r["run_id"] for r in history if r.get("run_id") != run_id][:8]
+    historical_events = [clean(x) async for x in db.events.find({"run_id": {"$in": prior_ids}}).sort("timestamp", 1).limit(160)] if prior_ids else []
+    provider_status = "deterministic"
+    if settings.rca_provider.lower() == "ollama":
+        try:
+            report = await enrich_with_ollama(report, clean(run), events, history, historical_events, settings.rca_ollama_base_url, settings.rca_ollama_model, settings.rca_timeout_seconds)
+            provider_status = "ollama"
+        except Exception as exc:
+            # RCA remains available without the LLM; expose this transparently.
+            report["ai_status"] = "unavailable"
+            report["ai_error_type"] = type(exc).__name__
+            report["ai_fallback_reason"] = "Local AI model was unavailable or returned an invalid response; deterministic diagnosis was retained."
+            logger.warning("RCA model unavailable for run %s: %s", run_id, type(exc).__name__)
+    else:
+        report["ai_status"] = "disabled"
+    valid_event_ids = {e.get("event_id") for e in events}
+    report["evidence_event_ids"] = [x for x in report.get("evidence_event_ids", []) if x in valid_event_ids]
+    now = datetime.now(timezone.utc)
+    report_doc = {"investigation_id": make_id("inv"), "run_id": run_id, "project_id": run["project_id"], "created_at": now, **report}
+    await db.investigations.insert_one(report_doc)
+    return clean(report_doc)
+
+
+@app.get("/api/runs/{run_id}/investigations")
+async def list_investigations(run_id: str):
+    if not await db.runs.find_one({"run_id": run_id}):
+        raise HTTPException(404, "Run not found")
+    return [clean(x) async for x in db.investigations.find({"run_id": run_id}).sort("created_at", -1).limit(20)]

@@ -6,6 +6,10 @@ class Settings(BaseSettings):
     mongodb_database: str = "tracelens"
     mongodb_tls_ca_file: str | None = None
     mongo_server_selection_timeout_ms: int = 5000
+    rca_provider: str = "ollama"
+    rca_ollama_base_url: str = "http://127.0.0.1:11434"
+    rca_ollama_model: str = "qwen2.5:3b"
+    rca_timeout_seconds: float = 45.0
 
     model_config = SettingsConfigDict(
         env_file=".env",

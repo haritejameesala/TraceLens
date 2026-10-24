@@ -1,1 +1,0 @@
-RAG Project 2: semantic retrieval using ChromaDB + SentenceTransformers. Install `pip install -r requirements.txt` and `pip install -e ..\\tracelens-sdk`, then run `python main.py`. First run downloads an embedding model. Requires TraceLens backend at localhost:8000.
