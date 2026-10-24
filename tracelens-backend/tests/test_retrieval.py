@@ -14,3 +14,9 @@ def test_sensitive_fields_are_redacted_recursively():
     value = redact({"api_key":"secret","nested":{"password":"nope","ok":3}})
     assert value["api_key"] == "[REDACTED]" and value["nested"]["password"] == "[REDACTED]"
     assert value["nested"]["ok"] == 3
+
+
+def test_redaction_preserves_datetime_objects():
+    from datetime import datetime, timezone
+    stamp = datetime.now(timezone.utc)
+    assert redact({"timestamp": stamp})["timestamp"] == stamp
