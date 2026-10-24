@@ -28,6 +28,8 @@ jobs:
       - name: Run backend unit tests
         working-directory: tracelens-backend
         run: python -m pytest -q
+      - name: Run SDK unit tests
+        run: python -m pytest -q tracelens-sdk/tests
       - name: Check SDK import
         run: python -c "from tracelens_sdk import TraceLens, TraceEvent; print('TraceLens SDK import OK')"
       - uses: actions/setup-node@v4
