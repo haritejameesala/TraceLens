@@ -78,10 +78,9 @@ def main():
     def execute(tracer, name, version, broken, baseline=None):
         with tracer.start_run(name, version=version, baseline_run_id=baseline,
                               metadata={"project": "rag-project-2", "vector_store": "chroma"}) as run:
-            retrieval_payload = {"query": QUESTION, "vector_store": "chroma", "version": version}
-            with run.trace_step("retrieve_documents", event_type="retrieval", payload=retrieval_payload):
+            with run.trace_step("retrieve_documents", event_type="retrieval", payload={"query": QUESTION, "vector_store": "chroma", "version": version}) as retrieval_step:
                 docs = rag.retrieve(QUESTION, broken)
-                retrieval_payload.update({
+                retrieval_step.payload.update({
                     "relevant_chunk_count": len(docs), "chunk_ids": [doc["id"] for doc in docs],
                     "distances": [round(doc["distance"], 4) for doc in docs],
                 })
