@@ -34,6 +34,15 @@ Prerequisites: Python 3.10+, MongoDB 6+ (local or Docker Desktop), and optionall
 
 5. Optional API protection: set TRACELENS_API_KEY to a strong random value. The dashboard asks for this key, and SDK clients send it in the X-API-Key header. Do not expose the API publicly without authentication, TLS, rate limiting, and per-project authorization.
 
+## Try the prebuilt demo
+
+After the backend is running, open a second terminal at the repository root and run:
+
+    python -m pip install httpx
+    python scripts/demo_seed.py
+
+The script creates a separate demo project, ingests a runbook, records a healthy baseline and a deliberately broken retrieval run, compares them, and saves a diagnosis. It never overwrites existing projects. Refresh the dashboard and select “TraceLens Demo — RAG regression”. Re-running the script creates another fresh demo workspace.
+
 ## Instrument a Python application
 
 Install the SDK in your application's virtual environment:
@@ -72,7 +81,7 @@ From tracelens-backend, run:
 
     python -m pytest -q
 
-The included tests cover deterministic diagnostic rules, chunking, lexical ranking, and redaction. They do not replace live MongoDB integration tests or browser end-to-end tests.
+A GitHub Actions workflow tests Python 3.10–3.12 and checks that the SDK imports. These tests do not replace live MongoDB integration tests or browser end-to-end tests.
 
 ## Security notes
 
