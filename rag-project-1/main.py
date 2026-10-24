@@ -65,10 +65,9 @@ def main():
     def execute(tracer, name, version, broken, baseline=None):
         with tracer.start_run(name, version=version, baseline_run_id=baseline,
                               metadata={"project": "rag-project-1", "retriever": "tfidf"}) as run:
-            retrieval_payload = {"query": QUESTION, "retriever": "tfidf", "version": version}
-            with run.trace_step("retrieve_documents", event_type="retrieval", payload=retrieval_payload):
+            with run.trace_step("retrieve_documents", event_type="retrieval", payload={"query": QUESTION, "retriever": "tfidf", "version": version}) as retrieval_step:
                 docs = retrieve(QUESTION, broken)
-                retrieval_payload.update({"relevant_chunk_count": len(docs), "chunk_ids": [d["id"] for d in docs]})
+                retrieval_step.payload.update({"relevant_chunk_count": len(docs), "chunk_ids": [d["id"] for d in docs]})
             generation_payload = {}
             with run.trace_step("generate_answer", event_type="generation", payload=generation_payload):
                 result, mode = answer(QUESTION, docs)
