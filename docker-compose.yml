@@ -1,0 +1,11 @@
+services:
+  mongodb:
+    image: mongo:8
+    container_name: tracelens-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - tracelens_mongo_data:/data/db
+volumes:
+  tracelens_mongo_data:
