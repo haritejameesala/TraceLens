@@ -95,3 +95,5 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 
 /* Destructive workspace actions are visually distinct and remain disabled without a selection. */
 .danger-button{color:#ff9eaa!important;border-color:#58303a!important;background:#21171d!important}.danger-button:hover:not(:disabled){background:#352027!important;border-color:#8b4352!important}.danger-button:disabled{opacity:.45;cursor:not-allowed}
+
+/* Run-scoped, memory-assisted investigation chat */

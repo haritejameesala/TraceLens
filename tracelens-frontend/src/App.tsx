@@ -214,7 +214,6 @@ function App() {
     try { const result = await request<CompareResult>('/api/runs/compare', { method:'POST', body: JSON.stringify({ baseline_run_id: baselineId, current_run_id: currentId }) }); setComparison(result); setActiveTab('Compare'); await refresh(true) }
     catch (err) { setError(err instanceof Error ? err.message : 'Comparison failed') } finally { setLoading(false) }
   }
-  // Ask the RCA endpoint to analyze the selected run and preserve the returned report for review.
   async function investigateRun() {
     if (!selectedRun) return
     setInvestigationLoading(true); setInvestigationError(''); setInvestigation(null)

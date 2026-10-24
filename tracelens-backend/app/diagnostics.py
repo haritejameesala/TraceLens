@@ -1,3 +1,30 @@
+_ERROR_RULES = [
+    ("syntax_or_import", ("syntaxerror", "indentationerror", "modulenotfounderror", "importerror"), "Inspect the source file and line; verify syntax, package installation, and the active Python environment."),
+    ("authentication", ("401", "unauthorized", "403", "forbidden", "invalid api key", "authentication failed"), "Verify credentials, token scope, and endpoint authentication without exposing secrets."),
+    ("rate_limit", ("429", "rate limit", "too many requests", "quota exceeded"), "Check provider quotas and retry policy; use bounded backoff where appropriate."),
+    ("server_error", ("500", "502", "503", "504", "internal server error", "bad gateway", "service unavailable"), "Check provider/service health and retryability; distinguish provider errors from local failures."),
+    ("context_length", ("context length", "context window", "maximum context", "too many tokens", "token limit exceeded"), "Inspect prompt/context size and model limits; reduce or summarize context before retrying."),
+    ("connection", ("connection refused", "connecterror", "connectionerror", "actively refused", "unreachable", "dns resolution", "name or service not known"), "Verify endpoint host/port, DNS, service availability, and network reachability."),
+    ("timeout", ("timeout", "timed out", "deadline exceeded", "readtimeout", "connecttimeout"), "Check stage latency, service load, timeout settings, and retryability."),
+    ("model_unavailable", ("model not found", "model unavailable", "no such model", "http 404", "status code: 404"), "Verify the exact model identifier is installed or available at the configured endpoint."),
+    ("retrieval", ("retrieval", "vector store", "chroma", "embedding", "collection not found", "index not found", "reranker"), "Inspect vector-store connectivity, collection/index names, embedding compatibility, filters, and reranker configuration."),
+    ("malformed_output", ("jsondecodeerror", "validationerror", "invalid json", "malformed output", "unexpected token"), "Inspect the output schema and parser error; validate model output before downstream use."),
+]
+
+
+def classify_error(event: dict) -> dict:
+    """Classify a recorded exception; this is a hint, not proof of root cause."""
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    exception_type = str(payload.get("exception_type") or event.get("exception_type") or "")
+    message = str(event.get("error") or event.get("message") or "")
+    text = f"{exception_type} {message}".lower()
+    for category, patterns, recommendation in _ERROR_RULES:
+        if any(pattern in text for pattern in patterns):
+            return {"category": category, "exception_type": exception_type or None, "recommendation": recommendation}
+    return {"category": "unknown", "exception_type": exception_type or None,
+            "recommendation": "Inspect the recorded exception and surrounding events; no known signature matched."}
+
+
 def _count(event, key):
     value = (event or {}).get("payload", {}).get(key)
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
@@ -61,14 +88,20 @@ def diagnose(base_events, current_events):
             })
 
     for event in current_events:
-        if event.get("status") == "failed":
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        is_failed = str(event.get("status", "")).lower() in {"failed", "failure", "error"} or bool(event.get("error")) or event.get("event_type") == "error"
+        if is_failed:
             event_id = event.get("event_id")
+            classification = classify_error(event)
+            summary = str(event.get("error") or payload.get("exception_type") or "failure status recorded without an exception message")[:500]
             findings.append({
-                "rule_id": "step_failure", "severity": "high",
-                "title": f"Failed step: {event.get('step', 'unknown')}",
-                "explanation": "An instrumented step failed in the current run.",
+                "rule_id": "direct_error", "severity": "high",
+                "title": f"{classification['category'].replace('_', ' ').title()} at {event.get('step', 'unknown')}",
+                "explanation": f"Recorded failure evidence: {summary}. Classified as {classification['category']}; classification is a diagnostic hint, not proof of an upstream cause.",
+                "error_category": classification["category"],
+                "exception_type": classification["exception_type"],
                 "evidence_event_ids": [event_id] if event_id else [],
-                "recommended_action": "Inspect the recorded error and the step's safe metadata.",
+                "recommended_action": classification["recommendation"],
             })
 
     if not findings:

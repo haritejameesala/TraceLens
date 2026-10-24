@@ -96,3 +96,18 @@ python -m pytest
 ## Versioning
 
 The SDK follows semantic versioning. Public API changes and event-schema changes are documented in `CHANGELOG.md`. Version `0.4.0` adds lifecycle start events, which consumers should tolerate as additive events.
+
+## Capturing startup/import failures
+
+The SDK can only capture exceptions after instrumentation begins. To capture Python syntax or import errors that occur before the application's own SDK setup, install the SDK and run the script through the wrapper:
+
+```bash
+export TRACELENS_PROJECT_ID=your-project-id
+export TRACELENS_API_URL=http://127.0.0.1:8000
+python -m tracelens_sdk.cli path/to/your_rag_app.py
+
+# Alternatively, when the console script is permitted by your OS
+tracelens-run path/to/your_rag_app.py
+```
+
+On PowerShell, set the same values with `$env:TRACELENS_PROJECT_ID` and `$env:TRACELENS_API_URL`. The wrapper uses best-effort telemetry and re-raises application errors so the process still exits unsuccessfully when the script fails. A reachable backend is required to persist the startup failure.

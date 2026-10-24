@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from contextlib import AbstractContextManager
 from typing import Any
@@ -14,6 +15,7 @@ from .events import TraceEvent
 from .privacy import sanitize_payload
 
 logger = logging.getLogger("tracelens.sdk")
+_active_steps: ContextVar[tuple[tuple[int, str], ...]] = ContextVar("tracelens_active_steps", default=())
 
 class TraceLens:
     """HTTP client for TraceLens. Only explicitly supplied metadata is captured."""
@@ -184,20 +186,33 @@ class TraceStep(AbstractContextManager):
         self.payload, self.source_file, self.source_line = payload, source_file, source_line
         self.started = 0.0
         self.step_id = None
+        self.start_event_id = None
+        self.parent_event_id = None
+        self._context_token = None
 
     def __enter__(self):
         self.started = time.perf_counter()
         from uuid import uuid4
         self.step_id = f"step_{uuid4().hex}"
-        self.run.record_event(TraceEvent(
+        stack = _active_steps.get()
+        self.parent_event_id = next((event_id for run_identity, event_id in reversed(stack)
+                                     if run_identity == id(self.run)), None)
+        start_event = TraceEvent(
             step=f"{self.step}.started"[:120], event_type=self.event_type,
             status="running", payload={"phase": "start", "step_id": self.step_id,
                          "started_at": datetime.now(timezone.utc).isoformat(), **sanitize_payload(self.payload)},
-            source_file=self.source_file, source_line=self.source_line, trace_id=self.run.trace_id,
-        ))
+            source_file=self.source_file, source_line=self.source_line,
+            parent_event_id=self.parent_event_id, trace_id=self.run.trace_id,
+        )
+        self.start_event_id = start_event.event_id
+        self.run.record_event(start_event)
+        self._context_token = _active_steps.set(stack + ((id(self.run), self.start_event_id),))
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        if self._context_token is not None:
+            _active_steps.reset(self._context_token)
+            self._context_token = None
         duration = round((time.perf_counter() - self.started) * 1000, 3)
         failed = exc is not None
         payload = sanitize_payload(dict(self.payload))
@@ -212,7 +227,8 @@ class TraceStep(AbstractContextManager):
             step=self.step, event_type=event_type,
             status="failed" if failed else "success", payload=payload,
             duration_ms=duration, error=error,
-            source_file=self.source_file, source_line=self.source_line, trace_id=self.run.trace_id,
+            source_file=self.source_file, source_line=self.source_line,
+            parent_event_id=self.parent_event_id, trace_id=self.run.trace_id,
         ))
         return False
 

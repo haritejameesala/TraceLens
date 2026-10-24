@@ -33,3 +33,10 @@ Open `http://127.0.0.1:8000/docs` and `http://127.0.0.1:8000/health`. Startup pe
 ## API
 
 Endpoints include `/health`, `/api/projects`, `/api/runs`, `/api/runs/{run_id}`, `/api/runs/{run_id}/events`, `/api/runs/compare`, and `/api/runs/{run_id}/findings`.
+
+
+## Incident memory
+
+The backend stores redacted, project-scoped incident summaries and evidence references when investigations identify failed runs. `GET /api/projects/{project_id}/memories` lists these records. `POST /api/memories/{memory_id}/confirm-fix` can record an explicitly confirmed corrective action. The run-level chatbot API has been removed; investigation reports and structured run/event APIs remain available.
+
+Memory matching is deterministic and does not require a separate vector database. Similarity is a lead for investigation, not proof of shared causation. See the repository-root `MONGODB_AI_DIRECTION_AND_TEST_MATRIX.md` for MongoDB recommendations and expanded test coverage.

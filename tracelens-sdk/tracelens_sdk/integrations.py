@@ -29,6 +29,16 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
         self._root_id = None
         self._started: dict[str, float] = {}
         self._failed = False
+        # Callback providers may retry notifications. Suppress duplicate lifecycle
+        # boundaries by framework run ID + operation + phase.
+        self._seen_callbacks: set[tuple[str, str, str]] = set()
+
+    def _claim_callback(self, run_id, operation: str, phase: str) -> bool:
+        key = (self._id(run_id) or "unknown", operation, phase)
+        if key in self._seen_callbacks:
+            return False
+        self._seen_callbacks.add(key)
+        return True
 
     @staticmethod
     def _id(value):
@@ -63,6 +73,8 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
             trace_id=self._trace_run.trace_id))
 
     def on_chain_start(self, serialized, inputs, *, run_id, parent_run_id=None, **kwargs):
+        if not self._claim_callback(run_id, "chain", "start"):
+            return
         rid = self._id(run_id)
         self._started[rid] = perf_counter()
         if parent_run_id is None:
@@ -76,6 +88,8 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
                     extra={"phase": "start", "input_keys": safe_inputs, "operation": "chain"})
 
     def on_chain_end(self, outputs, *, run_id, parent_run_id=None, **kwargs):
+        if not self._claim_callback(run_id, "chain", "end"):
+            return
         self._event("chain", "custom", run_id, parent_run_id, extra={"phase": "end", "output_keys": list(outputs.keys())[:50] if isinstance(outputs, dict) else []})
         if self._id(run_id) == self._root_id and self._trace_run is not None:
             self._trace_run.__exit__(None, None, None)
@@ -83,6 +97,8 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
             self._root_id = None
 
     def on_chain_error(self, error, *, run_id, parent_run_id=None, **kwargs):
+        if not self._claim_callback(run_id, "chain", "error"):
+            return
         self._failed = True
         self._event("chain", "error", run_id, parent_run_id, status="failed", error=error, extra={"phase": "error", "exception_type": type(error).__name__})
         if self._id(run_id) == self._root_id and self._trace_run is not None:
@@ -91,11 +107,15 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
             self._root_id = None
 
     def on_retriever_start(self, serialized, query, *, run_id, parent_run_id=None, **kwargs):
+        if not self._claim_callback(run_id, "retrieval", "start"):
+            return
         self._started[self._id(run_id)] = perf_counter()
         self._event((serialized or {}).get("name") or "retriever", "custom", run_id, parent_run_id,
                     extra={"phase": "start", "operation": "retrieval", "query_length": len(query) if isinstance(query, str) else None})
 
     def on_retriever_end(self, documents, *, run_id, parent_run_id=None, **kwargs):
+        if not self._claim_callback(run_id, "retrieval", "end"):
+            return
         docs = documents if isinstance(documents, (list, tuple)) else []
         sources = []
         chunk_ids = []
@@ -120,9 +140,13 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
                            "available_relevance_scores": scores})
 
     def on_retriever_error(self, error, *, run_id, parent_run_id=None, **kwargs):
+        if not self._claim_callback(run_id, "retrieval", "error"):
+            return
         self._event("retriever", "error", run_id, parent_run_id, status="failed", error=error, extra={"phase": "error"})
 
     def on_llm_start(self, serialized, prompts, *, run_id, parent_run_id=None, **kwargs):
+        if not self._claim_callback(run_id, "generation", "start"):
+            return
         self._started[self._id(run_id)] = perf_counter()
         model_name = (serialized or {}).get("kwargs", {}).get("model") or (serialized or {}).get("kwargs", {}).get("model_name")
         self._event((serialized or {}).get("name") or "llm", "generation", run_id, parent_run_id,
@@ -130,6 +154,8 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
                            "model": str(model_name)[:160] if model_name else None, "operation": "generation"})
 
     def on_chat_model_start(self, serialized, messages, *, run_id, parent_run_id=None, **kwargs):
+        if not self._claim_callback(run_id, "generation", "start"):
+            return
         self._started[self._id(run_id)] = perf_counter()
         model_name = (serialized or {}).get("kwargs", {}).get("model") or (serialized or {}).get("kwargs", {}).get("model_name")
         self._event((serialized or {}).get("name") or "chat_model", "generation", run_id, parent_run_id,
@@ -137,6 +163,8 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
                            "model": str(model_name)[:160] if model_name else None, "operation": "generation"})
 
     def on_llm_end(self, response, *, run_id, parent_run_id=None, **kwargs):
+        if not self._claim_callback(run_id, "generation", "end"):
+            return
         payload = {"phase": "end"}
         usage = getattr(getattr(response, "llm_output", None), "get", lambda *_: None)("token_usage")
         if isinstance(usage, dict):
@@ -153,4 +181,6 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
         self._event("generation", "generation", run_id, parent_run_id, extra=payload)
 
     def on_llm_error(self, error, *, run_id, parent_run_id=None, **kwargs):
+        if not self._claim_callback(run_id, "generation", "error"):
+            return
         self._event("generation", "error", run_id, parent_run_id, status="failed", error=error, extra={"phase": "error"})

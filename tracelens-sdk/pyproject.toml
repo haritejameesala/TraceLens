@@ -11,6 +11,7 @@ dependencies = ["httpx>=0.27,<1.0"]
 
 [project.scripts]
 tracelens-doctor = "tracelens_sdk.cli:main"
+tracelens-run = "tracelens_sdk.cli:run_main"
 
 [project.optional-dependencies]
 langchain = ["langchain-core>=0.3,<2.0"]

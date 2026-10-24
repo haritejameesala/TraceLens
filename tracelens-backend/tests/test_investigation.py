@@ -235,3 +235,43 @@ def test_concatenated_legacy_evidence_ids_are_split_only_into_real_event_ids():
         "evt_71352f86dea041c8953f6d63bcacba2d",
         "evt_16a031919df04e7ebb024de98c7b42c5",
     ]
+
+
+def test_syntax_error_is_identified_as_direct_execution_blocker():
+    result = deterministic_diagnosis(
+        {"run_id": "run_syntax", "status": "failed"},
+        [{"event_id": "evt_syntax", "step": "application startup", "event_type": "error",
+          "status": "failed", "error": "SyntaxError: invalid syntax at main.py:42"}],
+        [],
+    )
+    assert result["title"] == "Python syntax error stopped execution"
+    assert "before the affected code could execute" in result["likely_cause"]
+    assert "evt_syntax" in result["evidence_event_ids"]
+
+
+def test_deterministic_diagnosis_classifies_auth_rate_limit_server_and_context_errors():
+    cases = [
+        ("HTTP 401 Unauthorized", "Dependency authentication or authorization failed"),
+        ("HTTP 429 rate limit exceeded", "Model/API rate limit or quota was reached"),
+        ("HTTP 503 Service Unavailable", "Upstream service returned a server error"),
+        ("context window exceeded", "Model context limit exceeded"),
+    ]
+    for message, expected_title in cases:
+        report = deterministic_diagnosis(
+            {"run_id": "r", "status": "failed"},
+            [{"event_id": "evt", "step": "generation", "event_type": "error", "status": "failed", "error": message}],
+            [],
+        )
+        assert report["title"] == expected_title, (message, report["title"])
+        assert "evt" in report["evidence_event_ids"]
+
+
+def test_deterministic_diagnosis_classifies_malformed_output_separately():
+    report = deterministic_diagnosis(
+        {"run_id": "r", "status": "failed"},
+        [{"event_id": "evt-json", "step": "validation", "event_type": "error", "status": "failed",
+          "error": "JSONDecodeError: malformed output"}],
+        [],
+    )
+    assert report["title"] == "Model output could not be parsed or validated"
+    assert "evt-json" in report["evidence_event_ids"]

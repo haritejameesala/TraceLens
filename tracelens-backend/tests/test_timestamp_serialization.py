@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.encoders import jsonable_encoder
 
-from app.main import clean
+from app.serialization import clean
 
 
 def test_database_datetimes_are_serialized_as_utc_without_changing_the_instant():

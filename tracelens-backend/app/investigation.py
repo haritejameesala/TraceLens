@@ -355,7 +355,29 @@ def deterministic_diagnosis(run: dict, events: list[dict], history: list[dict], 
     connection_failed = connection_refused or any(x in error_text for x in ["connecterror", "connectionerror", "unreachable", "failed to establish a new connection"])
     endpoint_match = re.search(r"(?:https?://)?(?:127\.0\.0\.1|localhost|[a-z0-9.-]+):\d+", error_text)
     failed_stage = str((last_error or {}).get("step") or "pipeline stage")
-    if connection_failed:
+    if any(x in error_text for x in ["syntaxerror", "indentationerror", "modulenotfounderror", "importerror", "cannot import name"]):
+        syntax_or_import = any(x in error_text for x in ["syntaxerror", "indentationerror"])
+        title = "Python syntax error stopped execution" if syntax_or_import else "Python import or dependency error stopped execution"
+        cause = ("The recorded exception indicates Python could not parse the source or indentation before the affected code could execute. This is a direct execution blocker, not a RAG retrieval or generation quality issue."
+                 if syntax_or_import else "The recorded exception indicates a required module or imported symbol could not be loaded. Execution stopped before the affected pipeline stage could complete.")
+        fix = ["Open the referenced source file and line if those fields were captured, and correct the exact syntax or import reported by the traceback.", "Run the application import or its focused test in the same environment used by the RAG process.", "Rerun the pipeline and verify a new run reaches the previously blocked stage."]
+        confidence = "high"
+    elif any(x in error_text for x in ["401", "unauthorized", "403", "forbidden", "invalid api key", "authentication failed"]):
+        title = "Dependency authentication or authorization failed"
+        cause = "The recorded response indicates credentials or permissions were rejected. The trace does not establish whether the credential is expired, incorrectly configured, or lacks the required scope."
+        fix = ["Verify the configured credential and required scopes without logging or exposing the secret.", "Confirm the request is sent to the intended endpoint and environment.", "Retry after updating credentials and verify the response status changes."]
+        confidence = "high"
+    elif any(x in error_text for x in ["500", "502", "503", "504", "internal server error", "bad gateway", "service unavailable"]):
+        title = "Upstream service returned a server error"
+        cause = "The recorded error indicates a server-side failure from a dependency. The trace alone does not prove a local configuration problem."
+        fix = ["Check provider/service health and any captured request ID.", "Determine whether the operation is safe to retry and use bounded retries only.", "Compare failures across runs to determine whether the issue is transient or persistent."]
+        confidence = "high"
+    elif any(x in error_text for x in ["context length", "context window", "maximum context", "too many tokens", "token limit exceeded"]):
+        title = "Model context limit exceeded"
+        cause = "The recorded error indicates that the request exceeded a model or provider context/token limit."
+        fix = ["Inspect prompt and retrieved-context sizes.", "Reduce, filter, or summarize retrieved context while preserving required evidence.", "Verify the target model's supported context limit and retry with bounded input."]
+        confidence = "high"
+    elif connection_failed:
         endpoint = endpoint_match.group(0) if endpoint_match else None
         run_metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
         configured_endpoint = next((run_metadata.get(k) for k in ("llm_endpoint", "ollama_endpoint", "ollama_base_url", "base_url", "endpoint") if isinstance(run_metadata.get(k), str) and run_metadata.get(k)), None)
@@ -394,6 +416,11 @@ def deterministic_diagnosis(run: dict, events: list[dict], history: list[dict], 
         cause = "The trace suggests retrieval returned zero chunks or the retrieval stage failed. This can cause unsupported answers or a downstream empty-context failure."
         fix = ["Inspect query normalization, chunking and the indexed collection.", "Review similarity scores and any retrieval threshold.", "Verify the knowledge base was ingested and the retriever points to the intended collection."]
         confidence = "medium"
+    elif any(x in error_text for x in ["jsondecodeerror", "validationerror", "invalid json", "malformed output", "unexpected token"]):
+        title = "Model output could not be parsed or validated"
+        cause = "The recorded exception indicates the output did not satisfy the expected format or schema. This is distinct from a retrieval or connectivity failure unless earlier evidence shows otherwise."
+        fix = ["Inspect the parser/schema error and expected output format.", "Validate output before downstream processing and capture a redacted validation summary.", "Add a regression fixture for the malformed response and test the recovery path."]
+        confidence = "high"
     elif failed:
         title = f"Failure in {last_error.get('step') or 'pipeline execution'}"
         cause = (str(last_error.get("error") or "A failed/error event was recorded.")[:700])

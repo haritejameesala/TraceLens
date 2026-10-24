@@ -27,6 +27,9 @@ async def ensure_indexes():
     await db.findings.create_index([("run_id", 1), ("created_at", -1)])
     await db.investigations.create_index("investigation_id", unique=True)
     await db.investigations.create_index([("run_id", 1), ("created_at", -1)])
+    await db.incident_memories.create_index("memory_id", unique=True)
+    await db.incident_memories.create_index([("project_id", 1), ("created_at", -1)])
+    await db.incident_memories.create_index([("project_id", 1), ("signature", 1)])
     # Create this only after legacy records have been consolidated at startup.
 
 

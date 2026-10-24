@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import re
 import logging
 import httpx
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo.errors import DuplicateKeyError
 from app.db import client, db, ensure_indexes, deduplicate_legacy_projects
@@ -11,29 +11,12 @@ from app.models import ProjectCreate, ProjectUpdate, RunCreate, RunUpdate, RunDe
 from app.diagnostics import diagnose
 from app.investigation import deterministic_diagnosis, enrich_with_ollama, normalize_evidence_event_ids
 from app.config import settings
+from app.memory import error_signature, redact
+from app.serialization import clean
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tracelens")
 
-
-def clean(doc):
-    if doc is None:
-        return None
-
-    def normalize_datetimes(value):
-        if isinstance(value, datetime):
-            if value.tzinfo is None:
-                return value.replace(tzinfo=timezone.utc)
-            return value.astimezone(timezone.utc)
-        if isinstance(value, dict):
-            return {key: normalize_datetimes(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [normalize_datetimes(item) for item in value]
-        return value
-
-    result = dict(doc)
-    result.pop("_id", None)
-    return normalize_datetimes(result)
 
 
 @asynccontextmanager
@@ -143,6 +126,7 @@ async def delete_project(project_id: str):
             {"run_id": {"$in": run_ids}},
         ]})
         await db.runs.delete_many({"project_id": project_id})
+    await db.incident_memories.delete_many({"project_id": project_id})
     await db.projects.delete_one({"project_id": project_id})
     return {"status": "deleted", "project_id": project_id, "deleted_runs": len(run_ids)}
 
@@ -203,6 +187,7 @@ async def delete_run(run_id: str):
         {"baseline_run_id": run_id},
     ]})
     await db.investigations.delete_many({"run_id": run_id})
+    await db.incident_memories.update_many({"run_id": run_id}, {"$set": {"source_run_deleted": True}})
     await db.runs.delete_one({"run_id": run_id})
     # Remove baseline references to the deleted run from remaining runs.
     await db.runs.update_many({"baseline_run_id": run_id}, {"$set": {"baseline_run_id": None}})
@@ -343,7 +328,44 @@ async def investigate_run(run_id: str):
     now = datetime.now(timezone.utc)
     report_doc = {"investigation_id": make_id("inv"), "run_id": run_id, "project_id": run["project_id"], "created_at": now, **report}
     await db.investigations.insert_one(report_doc)
+    # Automatically create a project-scoped incident memory from a failed or suspicious run.
+    # Store a redacted summary and event references, not raw payloads or prompts.
+    signature = error_signature(clean(run), events, report)
+    if str(run.get("status", "")).lower() == "failed" or any(e.get("status") == "failed" or e.get("error") for e in events):
+        memory_doc = {
+            "memory_id": make_id("mem"), "project_id": run["project_id"], "run_id": run_id,
+            "investigation_id": report_doc["investigation_id"], **signature,
+            "evidence_event_ids": report.get("evidence_event_ids", [])[:10],
+            "outcome": "unverified", "verified_fix": None, "created_at": now,
+            "source": "automatic_investigation",
+        }
+        await db.incident_memories.update_one(
+            {"project_id": run["project_id"], "run_id": run_id, "signature": signature["signature"]},
+            {"$setOnInsert": memory_doc}, upsert=True,
+        )
     return clean(report_doc)
+
+
+@app.get("/api/projects/{project_id}/memories")
+async def list_project_memories(project_id: str):
+    if not await db.projects.find_one({"project_id": project_id}):
+        raise HTTPException(404, "Project not found")
+    return [clean(x) async for x in db.incident_memories.find({"project_id": project_id}).sort("created_at", -1).limit(200)]
+
+
+@app.post("/api/memories/{memory_id}/confirm-fix")
+async def confirm_memory_fix(memory_id: str, body: dict = Body(...)):
+    """Promote a proposed fix only after explicit user confirmation with a concise outcome note."""
+    note = redact(str(body.get("fix", "")).strip(), 1000)
+    if not note:
+        raise HTTPException(422, "fix must describe the confirmed corrective action")
+    result = await db.incident_memories.update_one({"memory_id": memory_id}, {"$set": {
+        "outcome": "user_verified", "verified_fix": note,
+        "verified_at": datetime.now(timezone.utc), "verification_source": "explicit_user_confirmation",
+    }})
+    if not result.matched_count:
+        raise HTTPException(404, "Incident memory not found")
+    return clean(await db.incident_memories.find_one({"memory_id": memory_id}))
 
 
 @app.get("/api/runs/{run_id}/investigations")
