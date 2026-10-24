@@ -1,87 +1,49 @@
-# Python bytecode and cache
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
 *.pyd
-
-# Virtual environments
+*.egg-info/
+build/
+dist/
 .venv/
 venv/
-env/
 ENV/
 
-# Environment variables and secrets
+# Secrets / local configuration
 .env
 .env.*
 !.env.example
 !.env.*.example
-
-# Python packaging
-build/
-dist/
-*.egg-info/
-.eggs/
-wheels/
-pip-wheel-metadata/
-
-# Testing and coverage
-.pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-.tox/
-.nox/
-.mypy_cache/
-.ruff_cache/
-
-# IDE and editor files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Logs and temporary files
-*.log
-logs/
-tmp/
-temp/
-*.tmp
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Machine learning model caches
-.cache/
-cache/
-huggingface_cache/
-transformers_cache/
-sentence_transformers_cache/
-
-# Vector database and generated indexes
-chroma_db/
-chroma_data/
-vector_store/
-faiss_index/
-*.faiss
-*.index
-
-# Local databases and data files
-*.sqlite
-*.sqlite3
-*.db
-
-# OS-generated files
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Local secrets and certificates
 *.pem
 *.key
 secrets/
 credentials/
 
-# Keep example configuration files
-!.env.example
-!.env.*.example
+# Tests / tooling
+.pytest_cache/
+.coverage*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs and local databases
+*.log
+logs/
+*.sqlite
+*.sqlite3
+*.db
+
+# Generated vector indexes and model caches
+chroma_db/
+chroma_data/
+vector_store/
+faiss_index/
+.cache/
+huggingface_cache/

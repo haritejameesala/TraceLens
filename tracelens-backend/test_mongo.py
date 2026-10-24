@@ -1,29 +1,21 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pymongo import MongoClient
-import certifi
+"""Safe MongoDB connection check. Run from tracelens-backend with its venv active."""
+import asyncio
+from app.db import client, db
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        extra="ignore",
-    )
+async def main():
+    try:
+        result = await client.admin.command("ping")
+        print("MongoDB ping: PASS")
+        print("Database:", db.name)
+        print("Result ok:", result.get("ok") == 1.0)
+    except Exception as exc:
+        # Do not print exception text: it can contain host/URI details.
+        print("MongoDB ping: FAIL")
+        print("Error type:", type(exc).__name__)
+        print("Check Atlas IP access, credentials, URI, DNS, and TLS/network policy.")
+        raise SystemExit(1)
+    finally:
+        client.close()
 
-    mongodb_uri: str
-    mongodb_database: str
-
-settings = Settings()
-
-client = MongoClient(
-    settings.mongodb_uri,
-    tlsCAFile=certifi.where(),
-    serverSelectionTimeoutMS=15000,
-)
-
-try:
-    print(client.admin.command("ping"))
-    print("MongoDB Atlas connection successful")
-    print("Database:", settings.mongodb_database)
-except Exception as exc:
-    print(type(exc).__name__, exc)
-finally:
-    client.close()
+if __name__ == "__main__":
+    asyncio.run(main())
