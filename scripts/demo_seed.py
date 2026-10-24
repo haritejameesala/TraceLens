@@ -7,6 +7,7 @@ Optional environment:
     TRACELENS_API_KEY=your-development-key
 """
 import os
+from uuid import uuid4
 import httpx
 
 BASE_URL = os.getenv("TRACELENS_API_URL", "http://127.0.0.1:8000").rstrip("/")
@@ -19,6 +20,7 @@ When comparing releases, compare retrieved chunk IDs and scores before assuming 
 
 
 def main():
+    run_tag = uuid4().hex[:10]
     with httpx.Client(base_url=BASE_URL, headers=HEADERS, timeout=15) as api:
         api.get("/health").raise_for_status()
         project = api.post("/api/projects", json={
