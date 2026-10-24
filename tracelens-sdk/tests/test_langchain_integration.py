@@ -11,6 +11,7 @@ class FakeRun:
         self.events = []
         self.entered = False
         self.exit_args = None
+        self.trace_id = "fake-trace-id"
 
     def __enter__(self):
         self.entered = True
@@ -46,6 +47,7 @@ def test_callback_records_root_retrieval_and_finishes_run():
     assert len(tracer.runs) == 1
     run = tracer.runs[0]
     assert run.entered and run.exit_args == (None, None, None)
+    assert all(event.trace_id == run.trace_id for event in run.events)
     retrieval = [event for event in run.events if event.event_type == "retrieval"]
     assert len(retrieval) == 1
     assert retrieval[0].payload["retrieved_chunk_count"] == 0

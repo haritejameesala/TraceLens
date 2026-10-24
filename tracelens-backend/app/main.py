@@ -19,9 +19,21 @@ logger = logging.getLogger("tracelens")
 def clean(doc):
     if doc is None:
         return None
-    doc = dict(doc)
-    doc.pop("_id", None)
-    return doc
+
+    def normalize_datetimes(value):
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                return value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc)
+        if isinstance(value, dict):
+            return {key: normalize_datetimes(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [normalize_datetimes(item) for item in value]
+        return value
+
+    result = dict(doc)
+    result.pop("_id", None)
+    return normalize_datetimes(result)
 
 
 @asynccontextmanager
@@ -319,7 +331,10 @@ async def investigate_run(run_id: str):
                     and item.get("event_id") in valid_event_ids and item.get("explanation")}
     report["timeline"] = []
     for event in sorted(events, key=lambda item: str(item.get("timestamp", ""))):
-        item = {"event_id": event.get("event_id"), "timestamp": str(event.get("timestamp", "")),
+        timestamp = event.get("timestamp", "")
+        if isinstance(timestamp, datetime):
+            timestamp = timestamp.isoformat()
+        item = {"event_id": event.get("event_id"), "timestamp": str(timestamp),
                 "step": event.get("step"), "status": event.get("status"), "event_type": event.get("event_type"),
                 "duration_ms": event.get("duration_ms"), "error": event.get("error") or ""}
         if item["event_id"] in explanations:

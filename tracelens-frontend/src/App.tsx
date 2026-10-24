@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Activity, BrainCircuit, AlertCircle, AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, Boxes, Check, CheckCircle2, ChevronDown, CircleHelp, Clock3, Code2, Database, ExternalLink, FileSearch, GitCompareArrows, Layers3, LoaderCircle, Menu, Plus, RefreshCw, Search, Settings2, ShieldCheck, Terminal, Trash2, Download, X, Pencil, Copy, RotateCcw } from 'lucide-react'
+import { dateText } from './date'
 
 // API response models are kept near the app shell so UI rendering stays type-safe.
 type Project = { project_id: string; name: string; description?: string; framework?: string; created_at?: string }
@@ -9,7 +10,6 @@ type Finding = { finding_id: string; run_id: string; baseline_run_id?: string; r
 type Investigation = { investigation_id: string; run_id: string; title: string; likely_cause: string; confidence: string; first_failure_event_id?: string|null; last_confirmed_event_id?: string|null; evidence_event_ids: string[]; timeline: {event_id?:string;timestamp?:string;step?:string;status?:string;event_type?:string;duration_ms?:number|null;error?:string;explanation?:string}[]; history_context?: {other_runs_considered:number;successful_runs:number;failed_runs:number;comparison_note:string}; historical_comparison?: string; ai_historical_commentary?: string; historical_differences?: {baseline_run_ids?:string[]; history_used?:boolean; uncomparable_fields?:{field:string;current_value:unknown;historical_run_id:string;reason:string}[]; endpoint_differences?:{field:string;current_value:unknown;historical_value:unknown;historical_run_id:string;historical_event_ids?:string[];current_event_ids?:string[]}[]; comparisons?:{run_id:string;status?:string;version?:string;scenario?:string;field_differences?:{field:string;current_value:unknown;historical_value:unknown;historical_run_id:string;historical_event_ids?:string[];current_event_ids?:string[]}[];missing_stages?:string[];additional_stages?:string[];stage_status_changes?:{stage:string;current_status:string;historical_status:string}[]}[]}; alternative_explanations: string[]; recommended_actions: string[]; limitations: string[]; analysis_method: string; model?: string; ai_status?: string; ai_fallback_reason?: string; ai_error_type?: string; created_at?: string }
 type CompareResult = { baseline: {run_id:string;scenario:string;status:string}; current: {run_id:string;scenario:string;status:string}; event_counts: {baseline:number;current:number}; findings: Finding[] }
 const initialApi = localStorage.getItem('tracelens-api-url') || 'http://127.0.0.1:8000'
-const dateText = (v?: string) => v ? new Date(v).toLocaleString() : '—'
 const shortId = (v?: string) => v ? (v.length > 20 ? `${v.slice(0, 17)}…` : v) : '—'
 const severityClass = (v?: string) => `severity ${String(v || 'info').toLowerCase()}`
 
