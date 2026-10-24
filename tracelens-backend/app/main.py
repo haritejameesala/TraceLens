@@ -1,6 +1,6 @@
 """TraceLens API: trace capture, knowledge retrieval, and grounded diagnosis."""
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone
 import json
 import math
 import re
@@ -44,7 +44,7 @@ def redact(value: Any, depth: int = 0) -> Any:
         return [redact(v, depth + 1) for v in value[:500]]
     if isinstance(value, str):
         return value[:20000]
-    if isinstance(value, (int, float, bool)) or value is None:
+    if isinstance(value, (datetime, date, int, float, bool)) or value is None:
         return value
     return str(value)[:2000]
 
