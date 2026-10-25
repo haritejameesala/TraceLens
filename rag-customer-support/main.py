@@ -284,7 +284,18 @@ def main() -> None:
                 answer = chain.invoke({"question": question}, config={"callbacks": [callback], "run_name": "customer-support-rag"})
                 print(f"\nAssistant> {answer}\n")
             except Exception as exc:
-                # The callback records the supported framework error event. Avoid logging inputs.
+                # Emit safe, structured context for LLM diagnosis without storing the question,
+                # answer, credentials, or exception locals.
+                try:
+                    callback._event("application.invoke", "error", "application", status="failed",
+                        extra={"phase": "error", "exception_type": type(exc).__name__,
+                               "question_length": len(question),
+                               "question_sha256": sha256(question.encode("utf-8", errors="replace")).hexdigest(),
+                               "model": os.getenv("OLLAMA_MODEL", "qwen2.5:3b"),
+                               "embedding_model": os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
+                               "retrieval_k": int(os.getenv("RETRIEVAL_K", "4"))}, error=exc)
+                except Exception:
+                    pass
                 print(f"\nThe request failed ({type(exc).__name__}). Check service availability and TraceLens events.\n")
 
 

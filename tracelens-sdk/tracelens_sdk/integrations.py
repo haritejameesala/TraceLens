@@ -7,6 +7,7 @@ manual hooks or a custom integration. Payload capture is deliberately minimal.
 from __future__ import annotations
 from time import perf_counter
 import hashlib
+import json
 from typing import Any
 
 try:
@@ -84,13 +85,41 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
                 metadata={**self.metadata, "framework": "langchain"})
             self._trace_run.__enter__()
         safe_inputs = list(inputs.keys())[:50] if isinstance(inputs, dict) else []
+        input_summary = {}
+        if isinstance(inputs, dict):
+            for key, value in list(inputs.items())[:50]:
+                # Capture shape/size, never raw customer content.
+                if isinstance(value, str):
+                    input_summary[str(key)[:80]] = {"type": "string", "length": len(value),
+                        "sha256": hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()}
+                elif isinstance(value, (list, tuple)):
+                    input_summary[str(key)[:80]] = {"type": type(value).__name__, "count": len(value)}
+                elif isinstance(value, dict):
+                    input_summary[str(key)[:80]] = {"type": "object", "keys": sorted(str(k)[:80] for k in value.keys())[:50]}
+                else:
+                    input_summary[str(key)[:80]] = {"type": type(value).__name__}
         self._event((serialized or {}).get("name") or "chain", "custom", run_id, parent_run_id,
-                    extra={"phase": "start", "input_keys": safe_inputs, "operation": "chain"})
+                    extra={"phase": "start", "input_keys": safe_inputs, "input_summary": input_summary,
+                           "operation": "chain", "framework_version": self.metadata.get("langchain_version")})
 
     def on_chain_end(self, outputs, *, run_id, parent_run_id=None, **kwargs):
         if not self._claim_callback(run_id, "chain", "end"):
             return
-        self._event("chain", "custom", run_id, parent_run_id, extra={"phase": "end", "output_keys": list(outputs.keys())[:50] if isinstance(outputs, dict) else []})
+        output_summary = {}
+        if isinstance(outputs, dict):
+            for key, value in list(outputs.items())[:50]:
+                if isinstance(value, str):
+                    output_summary[str(key)[:80]] = {"type": "string", "length": len(value),
+                        "sha256": hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()}
+                elif isinstance(value, (list, tuple)):
+                    output_summary[str(key)[:80]] = {"type": type(value).__name__, "count": len(value)}
+                elif isinstance(value, dict):
+                    output_summary[str(key)[:80]] = {"type": "object", "keys": sorted(str(k)[:80] for k in value.keys())[:50]}
+                else:
+                    output_summary[str(key)[:80]] = {"type": type(value).__name__}
+        self._event("chain", "custom", run_id, parent_run_id, extra={"phase": "end",
+                    "output_keys": list(outputs.keys())[:50] if isinstance(outputs, dict) else [],
+                    "output_summary": output_summary})
         if self._id(run_id) == self._root_id and self._trace_run is not None:
             self._trace_run.__exit__(None, None, None)
             self._trace_run = None
@@ -137,7 +166,11 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
         self._event("retriever", "retrieval", run_id, parent_run_id,
                     extra={"phase": "end", "retrieved_chunk_count": len(docs),
                            "source_files": sorted(set(sources))[:50], "chunk_ids": chunk_ids,
-                           "available_relevance_scores": scores})
+                           "available_relevance_scores": scores,
+                           "documents_with_source": len(sources),
+                           "documents_with_chunk_id": len(chunk_ids),
+                           "score_count": len(scores),
+                           "empty_retrieval": len(docs) == 0})
 
     def on_retriever_error(self, error, *, run_id, parent_run_id=None, **kwargs):
         if not self._claim_callback(run_id, "retrieval", "error"):
@@ -178,6 +211,16 @@ class TraceLensCallbackHandler(BaseCallbackHandler):
                 value = response_metadata.get(source_key)
                 if isinstance(value, (str, int, float)):
                     payload[target_key] = str(value)[:160]
+        generations = getattr(response, "generations", None)
+        if isinstance(generations, list):
+            payload["generation_count"] = sum(len(batch) for batch in generations if isinstance(batch, list))
+            first = next((item for batch in generations if isinstance(batch, list) for item in batch), None)
+            generation_info = getattr(first, "generation_info", None) if first is not None else None
+            if isinstance(generation_info, dict):
+                for key in ("finish_reason", "stop_reason", "model_name"):
+                    value = generation_info.get(key)
+                    if isinstance(value, (str, int, float, bool)):
+                        payload[key] = str(value)[:160]
         self._event("generation", "generation", run_id, parent_run_id, extra=payload)
 
     def on_llm_error(self, error, *, run_id, parent_run_id=None, **kwargs):
