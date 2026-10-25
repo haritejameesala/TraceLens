@@ -7,6 +7,9 @@ boundaries; it does not modify retrieval or generation behavior.
 from __future__ import annotations
 
 import os
+import sys
+import platform
+import importlib.metadata
 from pathlib import Path
 from typing import Iterable
 from hashlib import sha256
@@ -149,6 +152,12 @@ def ensure_project(project_id: str, api_url: str, strict: bool) -> str:
         print(f"[TraceLens] Using project {resolved}")
         return resolved
     except Exception as exc:
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {401, 403}:
+            raise RuntimeError(
+                "TraceLens project creation requires a signed-in dashboard session. "
+                "Create/select the project in the dashboard, generate its SDK key, "
+                "then set TRACELENS_PROJECT_ID and TRACELENS_API_KEY in this app's environment."
+            ) from exc
         if strict:
             raise RuntimeError(f"Could not resolve/register TraceLens project at {api_url}: {type(exc).__name__}") from exc
         print(f"[TraceLens] Project registration unavailable; tracing may be skipped: {type(exc).__name__}")
@@ -171,6 +180,45 @@ def _safe_endpoint(value: str) -> str:
         return "configured-endpoint-unparseable"
 
 
+def _runtime_fingerprint() -> dict:
+    """Record reproducibility facts without copying secret environment values."""
+    packages = {}
+    for package in (
+        "langchain", "langchain-core", "langchain-community", "langchain-chroma",
+        "langchain-ollama", "langchain-text-splitters", "chromadb",
+        "sentence-transformers", "transformers", "torch", "huggingface-hub",
+        "ollama", "httpx", "tracelens-sdk",
+    ):
+        try:
+            packages[package] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            packages[package] = None
+    manifest_fingerprints = {}
+    for path in (ROOT / "requirements.txt", ROOT / "pyproject.toml", ROOT / "uv.lock"):
+        try:
+            data = path.read_bytes()
+            manifest_fingerprints[path.name] = {
+                "sha256": sha256(data).hexdigest(),
+                "size_bytes": len(data),
+            }
+        except OSError:
+            continue
+    return {
+        "python_executable": sys.executable,
+        "python_version": platform.python_version(),
+        "platform": platform.platform(),
+        "package_versions": packages,
+        "dependency_manifests": manifest_fingerprints,
+        "relevant_environment_variable_names": sorted(
+            key for key in os.environ
+            if any(term in key.upper() for term in (
+                "MODEL", "OLLAMA", "EMBEDDING", "CHROMA", "VECTOR",
+                "LANGCHAIN", "HUGGINGFACE", "TRACELENS",
+            ))
+        ),
+    }
+
+
 def main() -> None:
     from dotenv import load_dotenv
     from tracelens_sdk import TraceLens, langchain_callback
@@ -187,10 +235,31 @@ def main() -> None:
         print(f"[TraceLens] API unavailable; support queries can continue (strict=false): {type(exc).__name__}")
 
     project_id = ensure_project(project_id, api_url, strict)
-    chain = build_chain()
-    print("Customer Support Knowledge Assistant")
-    print("Ask about account access, billing, incidents, or data handling. Type 'exit' to quit.\n")
-    with TraceLens(project_id=project_id, api_url=api_url, strict=strict) as tracer:
+    with TraceLens(
+        project_id=project_id,
+        api_url=api_url,
+        strict=strict,
+        api_key=os.getenv("TRACELENS_API_KEY"),
+    ) as tracer:
+        # Instrument initialization too: dependency, embedding-model, vector-store,
+        # and configuration errors often happen before the first user query.
+        with tracer.start_run(
+            "application-startup",
+            version=os.getenv("APP_VERSION", "1.0.0"),
+            metadata={
+                "application": "customer-support-knowledge-assistant",
+                "environment": os.getenv("APP_ENV", "local"),
+                "embedding_model": os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
+                "llm_model": os.getenv("OLLAMA_MODEL", "qwen2.5:3b"),
+                "llm_endpoint": _safe_endpoint(os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")),
+                "retrieval_k": int(os.getenv("RETRIEVAL_K", "4")),
+                "capture_mode": "application_startup",
+                "runtime_fingerprint": _runtime_fingerprint(),
+            },
+        ):
+            chain = build_chain()
+        print("Customer Support Knowledge Assistant")
+        print("Ask about account access, billing, incidents, or data handling. Type 'exit' to quit.\\n")
         while True:
             try:
                 question = input("You> ").strip()
@@ -220,4 +289,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main(
+    main()
