@@ -1,9 +1,8 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import re
-import logging
 import json
-import secrets
+import logging
 import httpx
 from fastapi import FastAPI, HTTPException, Response, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +14,10 @@ from app.investigation import deterministic_diagnosis, enrich_with_ollama, norma
 from app.config import settings
 from app.memory import error_signature, redact
 from app.serialization import clean
+from app.auth import password_hash, verify_password, issue_token, read_token
+from pydantic import BaseModel, EmailStr, Field
+import secrets as crypto_secrets
+import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tracelens")
@@ -42,63 +45,69 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:5173",
     ],
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-TraceLens-API-Key"],
 )
 
 
-def _sdk_key_map() -> dict[str, str]:
-    """Parse project-scoped SDK secrets from backend environment without logging secrets."""
-    raw = settings.tracelens_sdk_keys.strip()
-    if not raw:
-        return {}
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("TRACELENS_SDK_KEYS must be a JSON object mapping project IDs to secrets") from exc
-    if not isinstance(value, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in value.items()):
-        raise RuntimeError("TRACELENS_SDK_KEYS must be a JSON object mapping project IDs to string secrets")
-    return {k: v for k, v in value.items() if k and v}
 
+class AuthCredentials(BaseModel):
+    email: str = Field(min_length=5, max_length=254)
+    password: str = Field(min_length=8, max_length=128)
+
+def normalize_email(value: str) -> str:
+    value = value.strip().lower()
+    if "@" not in value or "." not in value.rsplit("@", 1)[-1] or any(c.isspace() for c in value):
+        raise HTTPException(422, "Enter a valid email address.")
+    return value
+
+@app.post("/api/auth/signup", status_code=201)
+async def signup(body: AuthCredentials):
+    email = normalize_email(body.email)
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(409, "An account with this email already exists. Sign in instead.")
+    user = {"user_id": make_id("usr"), "email": email, "password_hash": password_hash(body.password),
+            "created_at": datetime.now(timezone.utc), "auth_provider": "password"}
+    await db.users.insert_one(user)
+    safe = {"user_id": user["user_id"], "email": email}
+    return {"access_token": issue_token(safe), "token_type": "bearer", "user": safe}
+
+@app.post("/api/auth/login")
+async def login(body: AuthCredentials):
+    email = normalize_email(body.email)
+    user = await db.users.find_one({"email": email})
+    if not user or not verify_password(body.password, user.get("password_hash", "")):
+        raise HTTPException(401, "Email or password is incorrect.")
+    safe = {"user_id": user["user_id"], "email": email}
+    return {"access_token": issue_token(safe), "token_type": "bearer", "user": safe}
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    user = getattr(request.state, "user", None)
+    if not user:
+        raise HTTPException(401, "Please sign in.")
+    return {"user": user}
+
+@app.post("/api/auth/logout")
+async def logout():
+    # Bearer tokens are short-lived and stateless; client removes its session token.
+    return {"ok": True}
 
 @app.middleware("http")
-async def authenticate_sdk_ingestion(request: Request, call_next):
-    """Authenticate SDK writes when project-scoped keys are configured.
+async def authenticate_and_scope(request: Request, call_next):
+    """Local MVP mode: no account/session required for dashboard API calls.
 
-    Dashboard reads and local development remain unchanged. SDK ingestion routes are
-    protected once TRACELENS_SDK_KEYS is configured.
+    This intentionally simplifies local demos. Do not expose this mode on a public
+    deployment; restore account authentication before deploying to a shared server.
     """
-    protected = (
-        request.method == "POST" and request.url.path in {"/api/runs",}
-    ) or (
-        request.method == "POST" and re.fullmatch(r"/api/runs/[^/]+/events", request.url.path)
-    ) or (
-        request.method == "PATCH" and re.fullmatch(r"/api/runs/[^/]+", request.url.path)
-    )
-    if not protected:
+    if request.method == "OPTIONS":
         return await call_next(request)
-    keys = _sdk_key_map()
-    if not keys:
-        return await call_next(request)
-    supplied = request.headers.get("X-TraceLens-API-Key", "").strip()
-    project_id = None
-    if request.url.path == "/api/runs" and request.method == "POST":
-        try:
-            body = await request.json()
-            project_id = body.get("project_id") if isinstance(body, dict) else None
-        except Exception:
-            project_id = None
-    else:
-        run_id = request.url.path.split("/")[3]
-        run = await db.runs.find_one({"run_id": run_id}, {"project_id": 1})
-        project_id = run.get("project_id") if run else None
-    expected = keys.get(str(project_id)) if project_id else None
-    if not expected or not supplied or not secrets.compare_digest(supplied, expected):
-        from starlette.responses import JSONResponse
-        return JSONResponse({"detail": "Invalid or missing TraceLens SDK key for this project"}, status_code=401)
+    if request.url.path.startswith("/api/"):
+        # Route handlers expect a user context for project creation and SDK-key UI.
+        # All local demo data is assigned to this single workspace identity.
+        request.state.user = {"user_id": "usr_local_demo", "email": "local@tracelens.dev"}
     return await call_next(request)
-
 
 @app.get("/health")
 async def health():
@@ -111,15 +120,19 @@ async def health():
 
 
 @app.post("/api/projects", status_code=201)
-async def create_project(body: ProjectCreate, response: Response):
+async def create_project(body: ProjectCreate, response: Response, request: Request):
     # Idempotency is explicit when project_key is supplied. For older SDK/demo clients,
     # reuse a same-name + same-framework project rather than creating duplicates.
     values = body.model_dump()
+    owner_id = request.state.user["user_id"]
+    values["owner_user_id"] = owner_id
     key = values.get("project_key")
+    if key:
+        key = f"{owner_id}-{key}"[:180]
     if not key:
-        key = re.sub(r"[^a-z0-9]+", "-", f"{body.name}-{body.framework}".lower()).strip("-")[:150]
-        values["project_key"] = key
-    existing = await db.projects.find_one({"project_key": key})
+        key = re.sub(r"[^a-z0-9]+", "-", f"{owner_id}-{body.name}-{body.framework}".lower()).strip("-")[:150]
+    values["project_key"] = key
+    existing = await db.projects.find_one({"project_key": key, "owner_user_id": owner_id})
     if existing:
         response.status_code = 200
         # Keep the existing identity and history; update descriptive fields only.
@@ -129,7 +142,7 @@ async def create_project(body: ProjectCreate, response: Response):
         existing.update({"name": body.name, "description": body.description, "framework": body.framework})
         return clean(existing)
     # Legacy duplicate protection for records created before project_key existed.
-    existing = await db.projects.find_one({"name": body.name, "framework": body.framework})
+    existing = await db.projects.find_one({"name": body.name, "framework": body.framework, "owner_user_id": owner_id})
     if existing:
         response.status_code = 200
         await db.projects.update_one({"project_id": existing["project_id"]}, {"$set": {"project_key": key}})
@@ -145,6 +158,16 @@ async def create_project(body: ProjectCreate, response: Response):
         raise
     return clean(doc)
 
+
+@app.post("/api/projects/{project_id}/sdk-key")
+async def regenerate_sdk_key(project_id: str, request: Request):
+    project = await db.projects.find_one({"project_id": project_id, "owner_user_id": request.state.user["user_id"]})
+    if not project:
+        raise HTTPException(404, "Project not found in your workspace.")
+    key = "tl_" + crypto_secrets.token_urlsafe(32)
+    await db.projects.update_one({"project_id": project_id}, {"$set": {"sdk_key": key}})
+    return {"project_id": project_id, "api_key": key, "header": "X-TraceLens-API-Key",
+            "note": "Copy this key now. Regenerating it invalidates the previous key."}
 
 @app.get("/api/projects")
 async def list_projects():

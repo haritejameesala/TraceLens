@@ -14,7 +14,20 @@ const shortId = (v?: string) => v ? (v.length > 20 ? `${v.slice(0, 17)}…` : v)
 const severityClass = (v?: string) => `severity ${String(v || 'info').toLowerCase()}`
 
 /** Main dashboard shell: owns API state, selected project/run, and page navigation. */
+const authInputStyle: React.CSSProperties = {background:'#0d1320',border:'1px solid #2a3447',borderRadius:10,padding:'13px 14px',color:'#f3f5fa',outline:'none',fontSize:14}
+const authButtonStyle: React.CSSProperties = {display:'flex',justifyContent:'space-between',alignItems:'center',background:'#7295f6',color:'#071020',border:0,borderRadius:10,padding:'14px 16px',fontWeight:800,fontSize:14,cursor:'pointer'}
+
 function App() {
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('tracelens_token') || 'local-dev')
+  const [authUser, setAuthUser] = useState<{user_id:string;email:string}|null>(() => {
+    try { return JSON.parse(localStorage.getItem('tracelens_user') || '{\"user_id\":\"usr_local_demo\",\"email\":\"Local workspace\"}') } catch { return {user_id:'usr_local_demo',email:'Local workspace'} }
+  })
+  const [authMode, setAuthMode] = useState<'login'|'signup'>('login')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authBusy, setAuthBusy] = useState(false)
+  const [authError, setAuthError] = useState('')
+  const [sdkKeyValue, setSdkKeyValue] = useState('')
   const [apiUrl, setApiUrl] = useState(initialApi)
   const [apiDraft, setApiDraft] = useState(initialApi)
   const [health, setHealth] = useState<'checking'|'online'|'offline'>('checking')
@@ -48,14 +61,18 @@ function App() {
 
   // Centralize API errors and JSON handling so every screen reports failures consistently.
   const request = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
-    const response = await fetch(`${apiUrl.replace(/\/$/, '')}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } })
+    const response = await fetch(`${apiUrl.replace(/\/$/, '')}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...(init?.headers || {}) } })
     if (!response.ok) {
+      if (response.status === 401 && authToken && !path.startsWith('/api/auth/')) {
+        localStorage.removeItem('tracelens_token'); localStorage.removeItem('tracelens_user')
+        setAuthToken(''); setAuthUser(null)
+      }
       let detail = `${response.status} ${response.statusText}`
       try { const body = await response.json(); detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail ?? body) } catch { /* response may not be JSON */ }
       throw new Error(detail)
     }
     return response.json() as Promise<T>
-  }, [apiUrl])
+  }, [apiUrl, authToken])
 
   // Refresh workspace data from the backend; `quiet` avoids replacing the page with a spinner.
   const refresh = useCallback(async (quiet = false) => {
@@ -84,7 +101,8 @@ function App() {
     } finally { if (!quiet) setLoading(false) }
   }, [request, selectedProject, selectedRun, health])
 
-  useEffect(() => { void refresh() }, [apiUrl])
+  useEffect(() => { if (authToken) void refresh() }, [apiUrl, authToken])
+
   useEffect(() => {
     if (!selectedProject) { setRuns([]); return }
     let alive = true
@@ -236,11 +254,58 @@ function App() {
     return () => { alive = false }
   }, [activeTab, selectedProject, runs, request])
 
+  const submitAuth = async (event: React.FormEvent) => {
+    event.preventDefault(); setAuthBusy(true); setAuthError('')
+    try {
+      const response = await fetch(`${apiUrl.replace(/\/$/, '')}/api/auth/${authMode === 'signup' ? 'signup' : 'login'}`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({email: authEmail, password: authPassword})
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.detail || 'Authentication failed')
+      localStorage.setItem('tracelens_token', payload.access_token)
+      localStorage.setItem('tracelens_user', JSON.stringify(payload.user))
+      setAuthToken(payload.access_token); setAuthUser(payload.user); setAuthPassword('')
+    } catch (e) { setAuthError(e instanceof Error ? e.message : 'Could not authenticate') }
+    finally { setAuthBusy(false) }
+  }
+  const signOut = () => {
+    // Authentication is disabled in this local MVP build; return to the demo workspace.
+    localStorage.removeItem('tracelens_token'); localStorage.removeItem('tracelens_user')
+    setAuthToken('local-dev'); setAuthUser({user_id:'usr_local_demo',email:'Local workspace'})
+    setProjects([]); setRuns([]); setSelectedProject(''); setSelectedRun('')
+    void refresh()
+  }
+
+  const generateSdkKey = async () => {
+    if (!selectedProject) { setError('Create or select a project first.'); return }
+    try {
+      const result = await request<{api_key:string}>(`/api/projects/${encodeURIComponent(selectedProject)}/sdk-key`, {method:'POST'})
+      setSdkKeyValue(result.api_key)
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not generate SDK key') }
+  }
+
   const nav = [
     {name:'Overview', icon:Layers3}, {name:'Projects', icon:Boxes}, {name:'Runs', icon:Activity}, {name:'Compare', icon:GitCompareArrows}, {name:'Findings', icon:FileSearch}, {name:'History', icon:Clock3}, {name:'Events', icon:Terminal}
   ]
   // Page content is selected from local navigation state; reusable UI primitives live below App.
-  return <div className="app-shell">
+  if (false && !authToken) return <main className="auth-page" style={{minHeight:'100vh',display:'grid',gridTemplateColumns:'minmax(0,1.05fr) minmax(360px,.95fr)',background:'#080b12',color:'#f3f5fa',fontFamily:'Inter,system-ui,sans-serif'}}>
+    <section style={{padding:'clamp(28px,6vw,84px)',display:'flex',flexDirection:'column',justifyContent:'space-between',background:'radial-gradient(ellipse at 10% 20%,#142344 0%,#080b12 58%)'}}>
+      <div style={{fontWeight:800,fontSize:23,letterSpacing:'-.04em'}}>◈ TraceLens</div>
+      <div style={{maxWidth:560}}><div style={{color:'#8eaefb',fontSize:12,fontWeight:700,letterSpacing:'.16em'}}>RAG OBSERVABILITY PLATFORM</div><h1 style={{fontSize:'clamp(36px,5vw,64px)',lineHeight:1.05,letterSpacing:'-.05em',margin:'20px 0'}}>See what your AI pipeline misses.</h1><p style={{fontSize:17,lineHeight:1.8,color:'#a4aec2'}}>Trace retrieval, inspect execution failures, compare runs, and investigate regressions—all in one workspace.</p><div style={{display:'flex',gap:12,flexWrap:'wrap',marginTop:30,color:'#c1cbe0',fontSize:13}}><span>✓ Run timelines</span><span>✓ Evidence-backed diagnosis</span><span>✓ Project isolation</span></div></div>
+      <p style={{fontSize:12,color:'#647087'}}>Your projects and traces stay scoped to your account.</p>
+    </section>
+    <section style={{display:'grid',placeItems:'center',padding:28}}><form onSubmit={submitAuth} style={{width:'100%',maxWidth:420,display:'grid',gap:18}}>
+      <div><div style={{fontSize:12,color:'#8eaefb',fontWeight:700,letterSpacing:'.14em'}}>YOUR WORKSPACE</div><h2 style={{fontSize:30,margin:'12px 0 8px'}}>{authMode==='signup'?'Create your account':'Welcome back'}</h2><p style={{color:'#8c97ad',margin:0}}>{authMode==='signup'?'Start investigating your RAG pipelines.':'Sign in to continue to your TraceLens projects.'}</p></div>
+      <label style={{display:'grid',gap:8,fontSize:13,color:'#c4ccdc'}}>Email address<input required type="email" autoComplete="email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} placeholder="you@company.com" style={authInputStyle}/></label>
+      <label style={{display:'grid',gap:8,fontSize:13,color:'#c4ccdc'}}>Password<input required minLength={8} type="password" autoComplete={authMode==='signup'?'new-password':'current-password'} value={authPassword} onChange={e=>setAuthPassword(e.target.value)} placeholder="At least 8 characters" style={authInputStyle}/></label>
+      {authError && <div role="alert" style={{background:'#3b1720',border:'1px solid #78313d',color:'#ffb8c1',padding:12,borderRadius:9,fontSize:13}}>{authError}</div>}
+      <button disabled={authBusy} type="submit" style={authButtonStyle}>{authBusy?'Please wait…':authMode==='signup'?'Create account':'Sign in'} <span>→</span></button>
+      <p style={{textAlign:'center',fontSize:13,color:'#8c97ad'}}>{authMode==='signup'?'Already have an account?':'New to TraceLens?'} <button type="button" onClick={()=>{setAuthMode(authMode==='signup'?'login':'signup');setAuthError('')}} style={{background:'none',border:0,color:'#9bb8ff',fontWeight:700,cursor:'pointer'}}>{authMode==='signup'?'Sign in':'Create an account'}</button></p>
+      <p style={{fontSize:11,lineHeight:1.6,color:'#5e6a80',textAlign:'center'}}>Your account is protected by your password and a signed session. Use at least 8 characters for your password.</p>
+    </form></section></main>
+
+  return <div className="app-shell">\n    <div style={{position:"fixed",right:18,top:12,zIndex:20,display:"flex",alignItems:"center",gap:10,background:"#0e1420",border:"1px solid #263247",padding:"7px 10px",borderRadius:10,fontSize:12,color:"#b8c4d9"}}><span>{authUser?.email || "Local workspace"}</span><button onClick={signOut} style={{background:"#202b3d",color:"#e5eaf4",border:0,borderRadius:6,padding:"6px 9px",cursor:"pointer"}}>Reset workspace</button></div>
     <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>
       <div className="brand"><div className="brand-mark"><Activity size={21}/></div><div><div className="brand-name">TraceLens</div><div className="brand-sub">AI TRACE OBSERVATORY</div></div><button className="icon-btn mobile-close" onClick={() => setMobileNav(false)} aria-label="Close menu"><X size={18}/></button></div>
       <div className="workspace-label">WORKSPACE</div><div className="workspace-select"><div className="workspace-icon">TL</div><div className="workspace-copy"><strong>Local workspace</strong><span>Personal environment</span></div><ChevronDown size={15}/></div>
@@ -269,7 +334,7 @@ function App() {
         <footer className="footer"><span>TraceLens <span className="footer-dot">·</span> RAG observability & diagnostics</span><span><span className={`health-dot ${health}`}/>{health==='online'?'API and database ready':health==='checking'?'Checking connection':'Backend unavailable'} <button onClick={()=>void refresh()} className="footer-refresh">Refresh</button></span></footer>
       </div>
     </main>
-    {showSettings&&<Modal title="Connection settings" onClose={()=>setShowSettings(false)}><form onSubmit={saveApiUrl} className="modal-form"><label>TraceLens API URL<input value={apiDraft} onChange={e=>setApiDraft(e.target.value)} placeholder="http://127.0.0.1:8000" required/></label><p className="form-hint">The frontend calls the FastAPI backend directly. The backend must allow requests from <code>http://127.0.0.1:5173</code>.</p><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setShowSettings(false)}>Cancel</button><button className="button primary">Save and connect</button></div></form></Modal>}
+    {showSettings&&<Modal title="Connection settings" onClose={()=>setShowSettings(false)}><div className="modal-form"><h3>Project SDK credentials</h3><p className="form-hint">Generate a key for the selected project, then set <code>TRACELENS_PROJECT_ID</code> and <code>TRACELENS_API_KEY</code> in your RAG application environment.</p><button type="button" className="button secondary" onClick={generateSdkKey} disabled={!selectedProject}><ShieldCheck size={16}/> Generate / rotate SDK key</button>{sdkKeyValue&&<label>Copy this key now<input readOnly value={sdkKeyValue} onFocus={e=>e.currentTarget.select()}/><button type="button" className="button secondary" onClick={()=>{void navigator.clipboard.writeText(sdkKeyValue)}}><Copy size={15}/> Copy key</button></label>}</div><form onSubmit={saveApiUrl} className="modal-form"><label>TraceLens API URL<input value={apiDraft} onChange={e=>setApiDraft(e.target.value)} placeholder="http://127.0.0.1:8000" required/></label><p className="form-hint">The frontend calls the FastAPI backend directly. The backend must allow requests from <code>http://127.0.0.1:5173</code>.</p><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setShowSettings(false)}>Cancel</button><button className="button primary">Save and connect</button></div></form></Modal>}
     {showEditProject&&<Modal title="Edit project" onClose={()=>setShowEditProject(false)}><form onSubmit={updateProject} className="modal-form"><label>Project name<input autoFocus value={projectName} onChange={e=>setProjectName(e.target.value)} maxLength={120} required/></label><label>Description<textarea value={projectDescription} onChange={e=>setProjectDescription(e.target.value)} rows={3} maxLength={800}/></label><label>Framework<select value={framework} onChange={e=>setFramework(e.target.value)}><option value="python">Python</option><option value="scikit-learn">scikit-learn / TF-IDF</option><option value="chromadb">ChromaDB</option><option value="langchain">LangChain</option><option value="custom">Custom pipeline</option></select></label><p className="form-hint">Editing descriptive details preserves the project's stable ID and historical runs.</p><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setShowEditProject(false)}>Cancel</button><button className="button primary" disabled={loading||!projectName.trim()}>{loading?<LoaderCircle size={16} className="spin"/>:<Check size={16}/>} Save changes</button></div></form></Modal>}
     {showCreateProject&&<Modal title="Create project" onClose={()=>setShowCreateProject(false)}><form onSubmit={createProject} className="modal-form"><label>Project name<input autoFocus value={projectName} onChange={e=>setProjectName(e.target.value)} placeholder="e.g. Customer Support RAG" maxLength={120} required/></label><label>Description<textarea value={projectDescription} onChange={e=>setProjectDescription(e.target.value)} placeholder="What does this AI pipeline do?" rows={3} maxLength={800}/></label><label>Framework<select value={framework} onChange={e=>setFramework(e.target.value)}><option value="python">Python</option><option value="scikit-learn">scikit-learn / TF-IDF</option><option value="chromadb">ChromaDB</option><option value="langchain">LangChain</option><option value="custom">Custom pipeline</option></select></label><div className="modal-actions"><button type="button" className="button secondary" onClick={()=>setShowCreateProject(false)}>Cancel</button><button className="button primary" disabled={loading||!projectName.trim()}>{loading?<LoaderCircle size={16} className="spin"/>:<Plus size={16}/>} Create project</button></div></form></Modal>}
   </div>

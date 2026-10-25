@@ -97,3 +97,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .danger-button{color:#ff9eaa!important;border-color:#58303a!important;background:#21171d!important}.danger-button:hover:not(:disabled){background:#352027!important;border-color:#8b4352!important}.danger-button:disabled{opacity:.45;cursor:not-allowed}
 
 /* Run-scoped, memory-assisted investigation chat */
+
+
+/* Authentication layout: keep sign-in usable on tablets and narrow phones. */
+.auth-page{grid-template-columns:minmax(0,1.05fr) minmax(360px,.95fr)}
+.auth-page>section{min-width:0}
+.auth-page input{width:100%;min-width:0}
+@media (max-width: 760px){
+  .auth-page{grid-template-columns:minmax(0,1fr)!important}
+  .auth-page>section:first-child{min-height:auto!important;gap:30px;padding:28px 24px!important}
+  .auth-page>section:first-child h1{font-size:clamp(32px,9vw,46px)!important}
+  .auth-page>section:last-child{padding:28px 24px 40px!important}
+}

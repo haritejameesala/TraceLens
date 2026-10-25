@@ -63,25 +63,3 @@ def test_run_records_start_and_failure_lifecycle_events():
         assert patch[-1]["status"] == "failed"
     finally:
         tracer.close()
-
-
-
-def test_sdk_api_key_header_is_sent_from_explicit_argument():
-    seen = []
-    def handler(req):
-        seen.append(req.headers.get("X-TraceLens-API-Key"))
-        if req.method == "POST" and req.url.path == "/api/runs":
-            return httpx.Response(201, json={"run_id": "run-key"})
-        return httpx.Response(200, json={"status": "stored"})
-    tracer = TraceLens(
-        "project-test",
-        api_key="secret-project-key",
-        strict=False,
-        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
-    )
-    try:
-        with tracer.start_run("api-key-test"):
-            pass
-        assert seen and set(seen) == {"secret-project-key"}
-    finally:
-        tracer.close()

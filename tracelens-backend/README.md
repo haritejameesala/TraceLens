@@ -40,3 +40,25 @@ Endpoints include `/health`, `/api/projects`, `/api/runs`, `/api/runs/{run_id}`,
 The backend stores redacted, project-scoped incident summaries and evidence references when investigations identify failed runs. `GET /api/projects/{project_id}/memories` lists these records. `POST /api/memories/{memory_id}/confirm-fix` can record an explicitly confirmed corrective action. The run-level chatbot API has been removed; investigation reports and structured run/event APIs remain available.
 
 Memory matching is deterministic and does not require a separate vector database. Similarity is a lead for investigation, not proof of shared causation. See the repository-root `MONGODB_AI_DIRECTION_AND_TEST_MATRIX.md` for MongoDB recommendations and expanded test coverage.
+
+
+## Account authentication (added)
+
+TraceLens now supports email/password accounts, signed bearer sessions (7-day expiry), account-scoped project listing and project/run ownership checks. Passwords are stored as salted PBKDF2-HMAC-SHA256 hashes; the raw password is never stored.
+
+1. Copy `.env.example` to `.env`.
+2. Set `AUTH_SECRET` to a cryptographically random value of at least 32 characters. For example, run `python -c "import secrets; print(secrets.token_urlsafe(48))"` and paste the result.
+3. Start MongoDB and the backend. The startup lifespan creates a unique email index.
+4. Open the frontend and use **Create an account** or **Sign in**.
+5. To connect an SDK, sign in, create/select a project, open **Connection settings**, generate an SDK key, and put the displayed project ID and key in the RAG application's `.env` as `TRACELENS_PROJECT_ID` and `TRACELENS_API_KEY`.
+
+### Account sign-in
+
+TraceLens uses email/password authentication only. No third-party identity-provider credentials are needed. Copy `.env.example` to `.env`, set a random `AUTH_SECRET` of at least 32 characters, and restart the backend.
+
+### Security notes
+
+- Keep `.env` secrets out of source control.
+- SDK keys are project-scoped; rotating one invalidates the prior key.
+- Session tokens expire after seven days; signing out removes the browser's token.
+- This implementation does not yet provide email verification, password reset, refresh tokens, organization/team sharing, or server-side token revocation. Configure HTTPS and production secret management before public deployment.
