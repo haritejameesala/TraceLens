@@ -3,12 +3,16 @@
 Memory records contain redacted summaries and references, not raw prompts or payloads.
 Similarity is intentionally transparent and deterministic for the first implementation.
 """
+
 from __future__ import annotations
+
 import hashlib
 import re
+from datetime import datetime
 from typing import Any
 
-_SECRET = re.compile(r"(?i)(api[_-]?key|access[_-]?token|token|password|secret|authorization)\s*[:=]\s*[^\s,;&]+")
+# Redaction regexes
+_SECRET = re.compile(r"(?i)(api[_-]?key|access[_-]?token|token|password|secret|authorization)\s*[:=]\s*[^\s,;\u0026]+")
 _BEARER = re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+")
 _URL = re.compile(r"https?://[^\s'\"`]+", re.I)
 
@@ -16,9 +20,9 @@ _URL = re.compile(r"https?://[^\s'\"`]+", re.I)
 def redact(text: Any, limit: int = 1200) -> str:
     """Redact common credentials before incident summaries are persisted."""
     value = str(text or "")
-    value = _BEARER.sub(r"\1[REDACTED]", value)
-    value = _SECRET.sub(r"\1=[REDACTED]", value)
-    value = re.sub(r"(?i)([?&](?:api[_-]?key|access[_-]?token|token|secret|password)=)[^&\s]+", r"\1[REDACTED]", value)
+    value = _BEARER.sub(r"\\1[REDACTED]", value)
+    value = _SECRET.sub(r"\\1=[REDACTED]", value)
+    value = re.sub(r"(?i)([?\u0026](?:api[_-]?key|access[_-]?token|token|secret|password)=)[^\u0026\\s]+", r"\\1[REDACTED]", value)
     return value[:max(0, limit)]
 
 
@@ -27,8 +31,8 @@ def error_signature(run: dict, events: list[dict], report: dict) -> dict:
     error = redact(failed.get("error") or report.get("title") or report.get("likely_cause"), 500)
     classification_text = error.lower()
     normalized = _URL.sub("<url>", classification_text)
-    normalized = re.sub(r"\b\d{2,}\b", "<n>", normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
+    normalized = re.sub(r"\\b\\d{2,}\\b", "<n>", normalized)
+    normalized = re.sub(r"\\s+", " ", normalized).strip()
     category = "unknown"
     for label, patterns in {
         "syntax_or_import": ("syntaxerror", "indentationerror", "modulenotfounderror", "importerror"),
@@ -47,8 +51,14 @@ def error_signature(run: dict, events: list[dict], report: dict) -> dict:
             break
     stage = redact(failed.get("step") or failed.get("event_type") or "unknown", 120)
     signature = hashlib.sha256(f"{category}|{stage.lower()}|{normalized}".encode()).hexdigest()[:24]
-    return {"signature": signature, "category": category, "stage": stage, "error_summary": error,
-            "title": redact(report.get("title"), 200), "cause_summary": redact(report.get("likely_cause"), 1200)}
+    return {
+        "signature": signature,
+        "category": category,
+        "stage": stage,
+        "error_summary": error,
+        "title": redact(report.get("title"), 200),
+        "cause_summary": redact(report.get("likely_cause"), 1200),
+    }
 
 
 def memory_match_score(current: dict, past: dict) -> int:
@@ -65,4 +75,44 @@ def memory_match_score(current: dict, past: dict) -> int:
         score += 2
     return score
 
+# Helper functions required by agent_tools
 
+def _run_status(run: dict) -> str:
+    """Return the status of a run, defaulting to ``"unknown"``."""
+    return str(run.get("status", "unknown"))
+
+
+def _run_time(run: dict) -> str | None:
+    """Return a timestamp for the run.
+    Prefers ``started_at`` then ``created_at``.
+    """
+    return run.get("started_at") or run.get("created_at")
+
+
+def _parse_time(ts: str | None) -> datetime | None:
+    """Parse an ISO‑8601 string to ``datetime``.
+    Returns ``None`` on failure.
+    """
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.rstrip("Z"))
+    except Exception:
+        return None
+
+
+def _duration_summary(run: dict) -> dict:
+    """Return a simple duration summary for a run.
+    ``seconds`` is a float or ``None``; ``human`` is a readable string.
+    """
+    start = _parse_time(run.get("started_at"))
+    end = _parse_time(run.get("ended_at"))
+    secs = (end - start).total_seconds() if start and end else None
+    return {"seconds": secs, "human": f"{secs:.1f}s" if secs is not None else None}
+
+
+def answer_question(question: str, run: dict, events: list[dict], extra: dict | None, memories: list[dict], history: list[dict]) -> dict:
+    """Placeholder deterministic answer for tests.
+    Returns a minimal dict with an ``answer`` field.
+    """
+    return {"answer": f"Placeholder answer for: {question}"}

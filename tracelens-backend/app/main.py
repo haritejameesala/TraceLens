@@ -2,8 +2,10 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import re
 import logging
+import json
+import secrets
 import httpx
-from fastapi import FastAPI, HTTPException, Response, Body
+from fastapi import FastAPI, HTTPException, Response, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo.errors import DuplicateKeyError
 from app.db import client, db, ensure_indexes, deduplicate_legacy_projects
@@ -42,8 +44,60 @@ app.add_middleware(
     ],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type", "Authorization", "X-TraceLens-API-Key"],
 )
+
+
+def _sdk_key_map() -> dict[str, str]:
+    """Parse project-scoped SDK secrets from backend environment without logging secrets."""
+    raw = settings.tracelens_sdk_keys.strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("TRACELENS_SDK_KEYS must be a JSON object mapping project IDs to secrets") from exc
+    if not isinstance(value, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in value.items()):
+        raise RuntimeError("TRACELENS_SDK_KEYS must be a JSON object mapping project IDs to string secrets")
+    return {k: v for k, v in value.items() if k and v}
+
+
+@app.middleware("http")
+async def authenticate_sdk_ingestion(request: Request, call_next):
+    """Authenticate SDK writes when project-scoped keys are configured.
+
+    Dashboard reads and local development remain unchanged. SDK ingestion routes are
+    protected once TRACELENS_SDK_KEYS is configured.
+    """
+    protected = (
+        request.method == "POST" and request.url.path in {"/api/runs",}
+    ) or (
+        request.method == "POST" and re.fullmatch(r"/api/runs/[^/]+/events", request.url.path)
+    ) or (
+        request.method == "PATCH" and re.fullmatch(r"/api/runs/[^/]+", request.url.path)
+    )
+    if not protected:
+        return await call_next(request)
+    keys = _sdk_key_map()
+    if not keys:
+        return await call_next(request)
+    supplied = request.headers.get("X-TraceLens-API-Key", "").strip()
+    project_id = None
+    if request.url.path == "/api/runs" and request.method == "POST":
+        try:
+            body = await request.json()
+            project_id = body.get("project_id") if isinstance(body, dict) else None
+        except Exception:
+            project_id = None
+    else:
+        run_id = request.url.path.split("/")[3]
+        run = await db.runs.find_one({"run_id": run_id}, {"project_id": 1})
+        project_id = run.get("project_id") if run else None
+    expected = keys.get(str(project_id)) if project_id else None
+    if not expected or not supplied or not secrets.compare_digest(supplied, expected):
+        from starlette.responses import JSONResponse
+        return JSONResponse({"detail": "Invalid or missing TraceLens SDK key for this project"}, status_code=401)
+    return await call_next(request)
 
 
 @app.get("/health")

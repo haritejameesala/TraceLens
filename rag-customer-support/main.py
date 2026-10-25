@@ -73,7 +73,7 @@ def format_documents(documents: Iterable[Document]) -> str:
 def build_chain():
     """Build the RAG chain; TraceLens attaches at the invocation boundary, not each step."""
     from langchain_chroma import Chroma
-    from langchain_community.embeddings import HuggingFaceEmbeddings
+    from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.prompts import ChatPromptTemplate
     from langchain_core.runnables import RunnableLambda, RunnableParallel

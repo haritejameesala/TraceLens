@@ -25,7 +25,13 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-For account-authenticated backends, create/select a project in the dashboard and generate its SDK key from the Projects page. Copy the project ID and key into this app's local `.env` as `TRACELENS_PROJECT_ID` and `TRACELENS_API_KEY`. The key is shown once, can only write telemetry for that project, and must not be committed. If project registration returns 401/403, do not create another project; configure the project ID and SDK key instead.
+For account-authenticated backends, create/select a project in the dashboard and obtain its SDK ingestion key. Copy the project ID and key into this app's local `.env` as `TRACELENS_PROJECT_ID` and `TRACELENS_API_KEY`. On the backend, configure the matching project-to-key mapping in `tracelens-backend/.env`:
+
+```dotenv
+TRACELENS_SDK_KEYS={"YOUR_PROJECT_ID":"YOUR_LONG_RANDOM_KEY"}
+```
+
+Use the exact same key on both sides. Restart the backend after changing its `.env`. The backend only enforces SDK keys when this mapping is non-empty, preserving local development when no keys are configured. Never commit real secrets. If project registration returns 401/403, don't create another project; set the existing project ID and matching key.
 
 Pull and start a local model:
 
@@ -62,3 +68,14 @@ The first run downloads the embedding model and builds the local Chroma index fr
 ## Privacy notes
 
 The callback intentionally records operation names, counts, timing, exception type/message (bounded), and framework run IDs. Avoid adding raw prompts, answers, or document content to metadata. The backend supports dashboard accounts and project-scoped SDK keys; configure network restrictions, retention controls, and secret management before exposing it beyond localhost.
+
+
+## Trace startup through the CLI
+
+From this folder, with its `.env` configured and the SDK installed into the same virtual environment:
+
+```powershell
+python -m tracelens_sdk.cli .\main.py
+```
+
+Do not append a trailing backslash to the script path in PowerShell. To update the SDK after extracting a fixed TraceLens checkout, run `python -m pip install -e \`..\tracelens-sdk[langchain]\`` from this folder (or run the equivalent command from `tracelens-sdk`).

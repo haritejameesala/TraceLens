@@ -21,14 +21,20 @@ class TraceLens:
     """HTTP client for TraceLens. Only explicitly supplied metadata is captured."""
     def __init__(self, project_id: str, api_url: str = "http://127.0.0.1:8000",
                  timeout: float = 8.0, strict: bool = True,
-                 http_client: httpx.Client | None = None):
+                 http_client: httpx.Client | None = None,
+                 api_key: str | None = None):
         if not project_id or not project_id.strip():
             raise ValueError("project_id must be a non-empty string")
         self.project_id = project_id
         self.api_url = api_url.rstrip("/")
         self.strict = strict
         self._owns_client = http_client is None
-        self._http = http_client or httpx.Client(timeout=timeout)
+        self.api_key = (api_key if api_key is not None else os.getenv("TRACELENS_API_KEY", "")).strip()
+        headers = {"X-TraceLens-API-Key": self.api_key} if self.api_key else {}
+        self._http = http_client or httpx.Client(timeout=timeout, headers=headers)
+        # Also support an injected client, which is useful for tests/custom transports.
+        if http_client is not None and self.api_key:
+            self._http.headers["X-TraceLens-API-Key"] = self.api_key
 
     def _request(self, method: str, path: str, **kwargs):
         try:
@@ -42,10 +48,20 @@ class TraceLens:
                     body["error"] = sanitize_text(body["error"])
                 kwargs["json"] = body
             response = self._http.request(method, self.api_url + path, **kwargs)
+            if response.status_code == 401:
+                raise httpx.HTTPStatusError(
+                    "TraceLens returned HTTP 401. Set TRACELENS_API_KEY to the project SDK key and configure the same key in the backend TRACELENS_SDK_KEYS mapping, then restart the backend.",
+                    request=response.request, response=response,
+                )
+            if response.status_code == 403:
+                raise httpx.HTTPStatusError(
+                    "TraceLens returned HTTP 403. This SDK key may not be authorized for the requested project/run.",
+                    request=response.request, response=response,
+                )
             response.raise_for_status()
             return response.json() if response.content else None
         except Exception as exc:
-            logger.warning("TraceLens delivery failed (%s %s): %s", method, path, type(exc).__name__)
+            logger.warning("TraceLens delivery failed (%s %s): %s", method, path, str(exc) if isinstance(exc, httpx.HTTPStatusError) else type(exc).__name__)
             if self.strict:
                 raise
             return None
